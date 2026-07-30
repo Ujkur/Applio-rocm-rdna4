@@ -87,9 +87,12 @@ Or manually open `requirements.txt` in Notepad, delete lines starting with `torc
 
 ### Step 5 — Download pretrained models
 
-Applio requires pretrained models (HiFi-GAN vocoder, etc.). Download from [official docs](https://docs.applio.org/getting-started/pretrained/) and place in `rvc/models/pretraineds/`.
+Applio requires pretrained models (HiFi-GAN vocoder, etc.). Two options:
 
-Or run the official `run-install.bat` (downloads models but also creates a Conda environment; you can delete the `env/` directory after models are downloaded).
+1. **WebUI download (recommended)**: Launch Applio (`python app.py --open`), then download pretrained models in the WebUI under "Settings" → "Training".
+2. **Manual download**: Download from [official docs](https://docs.applio.org/getting-started/pretrained/) and place in `rvc/models/pretraineds/`.
+
+> **⚠️ Do not run the official `run-install.bat`**. It creates a Conda environment and installs non-ROCm torch, **which will break the ROCm torch environment set up in Step 2**. This guide's installation completely bypasses the official install script.
 
 ### Step 6 — Apply RDNA4 patches
 

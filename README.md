@@ -87,9 +87,12 @@ pip install -r requirements_no_torch.txt
 
 ### Step 5 — 下载预训练模型
 
-Applio 需要预训练模型（HiFi-GAN 声码器等）。按照 [官方文档](https://docs.applio.org/getting-started/pretrained/) 下载，放到 `rvc/models/pretraineds/` 目录。
+Applio 需要预训练模型（HiFi-GAN 声码器等）。有两种方式：
 
-或运行官方 `run-install.bat`（会下载模型，但同时会创建 Conda 环境；模型下载完成后可删除 `env/` 目录，不影响使用）。
+1. **WebUI 下载（推荐）**：启动 Applio（`python app.py --open`），在 WebUI 的「设置」→「训练」里点击下载预训练模型。
+2. **手动下载**：按照 [官方文档](https://docs.applio.org/getting-started/pretrained/) 下载，放到 `rvc/models/pretraineds/` 目录。
+
+> **⚠️ 不要运行官方 `run-install.bat`**。它会创建 Conda 环境并安装非 ROCm 版 torch，**会破坏本指南 Step 2 已装好的 ROCm torch 环境**。本指南的安装方式完全绕开了官方安装脚本。
 
 ### Step 6 — 应用 RDNA4 补丁
 
