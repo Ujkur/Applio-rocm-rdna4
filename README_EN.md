@@ -1,44 +1,53 @@
-[中文](README.md) | [English](README_EN.md)
+<div align="center">
 
 # Applio ROCm RDNA4
 
-Patch guide and one-click script for using [Applio](https://github.com/IAHispano/Applio-RVC-Fork) on AMD RX 9000 series (gfx1201 / RDNA4).
+**Run [Applio](https://github.com/IAHispano/Applio-RVC-Fork) training and inference on AMD RX 9000 series GPUs (gfx1201 / RDNA4)**
 
-The original Applio has 5 issues on RDNA4 GPUs. This guide provides a one-click patch script to fix all of them, plus 1 stitching optimization.
+![License](https://img.shields.io/badge/License-MIT-green)
+![Platform](https://img.shields.io/badge/Platform-Windows-0078D6)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB)
+![GPU](https://img.shields.io/badge/GPU-RX%209000%20Series%20%28gfx1201%29-ED1C24)
+![ROCm](https://img.shields.io/badge/ROCm-7.2.1-0066CC)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.9.1%2Brocm7.2.1-EE4C2C)
 
----
+[中文](README.md) · [English](README_EN.md)
+
+</div>
+
+The original Applio has **5 issues** on RDNA4 GPUs: inference crashes, metallic artifacts on long audio, CJK path errors, training errors, and slow training. This repo provides a **one-click patch script** that fixes all of them, plus **1 stitching quality optimization**. Code changes only — no model weights involved.
 
 ## Issues and Fixes
 
 | # | Issue | Severity | Fix | Modified File |
 |---|-------|----------|-----|---------------|
-| 1 | MIOpen crash during inference | Critical | Disable cudnn, use ATen native convolution (significant speedup) | `applio_cudnn_off.py` (new) |
-| 2 | Metallic artifacts on long audio | Critical | `x_center=5`, NSF forward <7s | `rvc/configs/config.py` |
-| 3 | faiss doesn't support CJK paths | Medium | Auto-copy to temp ASCII path | `rvc/infer/pipeline.py` |
+| 1 | MIOpen crash during inference | Critical | Disable cudnn, use ATen native convolution (actually faster) | `applio_cudnn_off.py` (new) |
+| 2 | Metallic artifacts on long audio | Critical | `x_center=5`, keep each NSF forward under 7s | `rvc/configs/config.py` |
+| 3 | faiss doesn't support CJK paths | Medium | Auto-copy non-ASCII paths to a temp dir before loading | `rvc/infer/pipeline.py` |
 | 4 | Training `init_process_group` error | Critical | `hasattr` check, skip for single GPU | `rvc/train/train.py` |
-| 5 | Slow training | Medium | `benchmark=False` to avoid MIOpen find | `rvc/train/train.py` |
+| 5 | Slow training | Medium | `benchmark=False` to avoid repeated MIOpen find | `rvc/train/train.py` |
 
-Also includes an optimization: equal-power crossfade (4096 samples/85ms) replacing bare `np.concatenate` for better chunk stitching quality.
-
----
+> [!NOTE]
+> Also includes a quality optimization: equal-power sin/cos crossfade (4096 samples / 85ms) replaces the bare `np.concatenate`, for smoother chunk stitching.
 
 ## Installation
 
-### Step 1 — Install Python 3.12
+### Step 1 · Install Python 3.12
 
-Download [Python 3.12](https://www.python.org/downloads/release/python-3120/) and install (check "Add to PATH").
+Download and install [Python 3.12](https://www.python.org/downloads/release/python-3120/) (check **Add to PATH**), then verify:
 
 ```cmd
 python --version
 ```
 
-Confirm output shows `Python 3.12.x`.
+Confirm the output shows `Python 3.12.x`.
 
-### Step 2 — Install ROCm SDK + PyTorch
+### Step 2 · Install ROCm SDK + PyTorch
 
-Requires AMD 26.2.2 or newer graphics driver ([AMD website](https://www.amd.com/en/support)).
+> [!IMPORTANT]
+> Requires AMD graphics driver **26.2.2 or newer** ([download from AMD](https://www.amd.com/en/support)).
 
-Install ROCm SDK:
+Install the ROCm SDK:
 
 ```cmd
 pip install --no-cache-dir ^
@@ -48,7 +57,7 @@ pip install --no-cache-dir ^
  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
 ```
 
-Install PyTorch (ROCm version, may take several minutes):
+Install PyTorch (ROCm build, large download — may take several minutes):
 
 ```cmd
 pip install --no-cache-dir ^
@@ -57,46 +66,52 @@ pip install --no-cache-dir ^
  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
 ```
 
-Verify:
+Verify GPU detection:
 
 ```cmd
 python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-Confirm output is similar to `2.9.1+rocm7.2.1 True AMD Radeon RX 9070 XT`.
+Expected output similar to:
 
-### Step 3 — Download original Applio
+```text
+2.9.1+rocm7.2.1 True AMD Radeon RX 9070 XT
+```
+
+### Step 3 · Download the original Applio
 
 ```cmd
 git clone https://github.com/IAHispano/Applio-RVC-Fork.git
 cd Applio-RVC-Fork
 ```
 
-### Step 4 — Install dependencies (skip torch)
+### Step 4 · Install dependencies (skip torch)
 
-**Note**: Applio's `requirements.txt` contains `torch==2.11.0`. Installing it directly will overwrite the ROCm torch you just installed. You must skip it.
+> [!WARNING]
+> Applio's `requirements.txt` pins `torch==2.11.0`. Installing it directly will **overwrite the ROCm torch from Step 2** — it must be filtered out.
 
-Filter out torch-related lines before installing:
+Filter out torch-related lines, then install:
 
 ```cmd
 findstr /v /b "torch==" requirements.txt | findstr /v /b "torchaudio==" | findstr /v /b "torchvision==" > requirements_no_torch.txt
 pip install -r requirements_no_torch.txt
 ```
 
-Or manually open `requirements.txt` in Notepad, delete lines starting with `torch==`, `torchaudio==`, `torchvision==`, save, then `pip install -r requirements.txt`.
+Or manually: open `requirements.txt` in Notepad, delete lines starting with `torch==`, `torchaudio==`, `torchvision==`, save, then `pip install -r requirements.txt`.
 
-### Step 5 — Download pretrained models
+### Step 5 · Download pretrained models
 
 Applio requires pretrained models (HiFi-GAN vocoder, etc.). Two options:
 
-1. **WebUI download (recommended)**: Launch Applio (`python app.py --open`), then download pretrained models in the WebUI under "Settings" → "Training".
-2. **Manual download**: Download from [official docs](https://docs.applio.org/getting-started/pretrained/) and place in `rvc/models/pretraineds/`.
+1. **WebUI download (recommended)**: launch Applio (`python app.py --open`), then download pretrained models in the WebUI under "Settings" → "Training".
+2. **Manual download**: download from the [official docs](https://docs.applio.org/getting-started/pretrained/) and place them in `rvc/models/pretraineds/`.
 
-> **⚠️ Do not run the official `run-install.bat`**. It creates a Conda environment and installs non-ROCm torch, **which will break the ROCm torch environment set up in Step 2**. This guide's installation completely bypasses the official install script.
+> [!CAUTION]
+> **Do not run the official `run-install.bat`**. It creates a Conda environment and installs a non-ROCm torch, **breaking the ROCm torch environment set up in Step 2**. This guide completely bypasses the official install script.
 
-### Step 6 — Apply RDNA4 patches
+### Step 6 · Apply RDNA4 patches
 
-Copy the two files from this repo to the Applio directory:
+Copy the two files from this repo into the Applio directory, then run the patch script:
 
 ```cmd
 git clone https://github.com/Ujkur/Applio-rocm-rdna4.git
@@ -106,21 +121,16 @@ copy Applio-rocm-rdna4\apply_rdna4_patches.py .
 python apply_rdna4_patches.py
 ```
 
-The script automatically modifies 5 files and backs up originals as `.bak`. Seeing `Done!` means success.
-
----
+The script automatically modifies 5 files and backs up the originals as `.bak`. Seeing `完成!` (Done) means success.
 
 ## Usage
 
-### Inference (cudnn-off)
+| Scenario | Launch command | cudnn | Why |
+|----------|---------------|-------|-----|
+| **Inference** | `python applio_cudnn_off.py --open` | Off | Convolution shapes vary; MIOpen find crashes every time |
+| **Training** | `python app.py --open` | On | Shapes are fixed; MIOpen find caches after the first run, faster than native convolution |
 
-```cmd
-python applio_cudnn_off.py --open
-```
-
-`applio_cudnn_off.py` disables cudnn(MIOpen) at startup and uses ATen native convolution. Inference must use this entry point — MIOpen crashes on gfx1201.
-
-### Training (cudnn-on + MIOpen)
+Set the MIOpen environment variables before training:
 
 ```cmd
 set MIOPEN_USER_DB_PATH=%USERPROFILE%\.miopen_applio
@@ -129,15 +139,14 @@ set MIOPEN_FIND_MODE=FAST
 python app.py --open
 ```
 
-If MIOpen reports clang not found during training, set the LLVM path:
+If MIOpen reports clang not found during training, also set the LLVM path:
 
 ```cmd
 set "PATH=<Python_install_path>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PATH%"
 ```
 
-**Use `applio_cudnn_off.py` for inference (cudnn off) and `app.py` for training (cudnn on). Do not mix them.** Training with cudnn-off is slow; inference with cudnn-on crashes.
-
----
+> [!WARNING]
+> **Do not mix the two entry points**: training with cudnn-off is slow; inference with cudnn-on crashes.
 
 ## Modification Details
 
@@ -147,76 +156,91 @@ Inference entry script that executes `torch.backends.cudnn.enabled = False` befo
 
 ### 2. `rvc/configs/config.py`
 
-```python
-# Original default (38s per chunk, causes metallic artifacts)
-x_pad, x_query, x_center, x_max = (1, 6, 38, 41)
-
-# RDNA4 patch (~5s per chunk, safe)
-x_pad, x_query, x_center, x_max = (1, 3, 5, 6)
+```diff
+- x_pad, x_query, x_center, x_max = (1, 6, 38, 41)   # original: 38s per chunk, metallic artifacts
++ x_pad, x_query, x_center, x_max = (1, 3, 5, 6)     # RDNA4: ~5s per chunk, safe
 ```
 
-`x_center` determines chunk size (split step). Actual NSF forward length ≈ `x_center + 2s` (padding). Critical threshold is 7-8s; exceeding it causes metallic artifacts in the latter part. `x_center=5` gives actual 7s, safe.
+`x_center` determines the chunk size (split step). Actual NSF forward length ≈ `x_center + 2s` (padding). The critical threshold is 7-8s; beyond that the latter part develops metallic artifacts. `x_center=5` gives an actual 7s, safe.
 
 ### 3. `rvc/infer/pipeline.py`
 
-- **crossfade (optimization)**: bare `np.concatenate` → equal-power sin/cos crossfade (4096 samples/85ms), improves chunk stitching quality
-- **faiss CJK path**: `faiss.read_index` uses C `fopen` which doesn't support CJK/full-width paths. Non-ASCII paths are auto-copied to a temp directory before loading
+- **crossfade (optimization)**: bare `np.concatenate` → equal-power sin/cos crossfade (4096 samples / 85ms), improves chunk stitching quality
+- **faiss CJK path**: `faiss.read_index` uses C `fopen`, which doesn't support CJK/full-width paths. Non-ASCII paths are auto-copied to a temp directory before loading
 - Added `import tempfile, shutil`
 
 ### 4. `rvc/train/train.py`
 
-```python
-# Original
-torch.backends.cudnn.benchmark = True       # ROCm: find on every new shape, slow
-dist.init_process_group(...)                 # unconditional call, ROCm torch may lack this
+```diff
+- torch.backends.cudnn.benchmark = True        # on ROCm, triggers MIOpen find for every new shape, slow
++ torch.backends.cudnn.benchmark = False       # use default algorithm, skip find
 
-# RDNA4 patch
-torch.backends.cudnn.benchmark = False                    # use default algorithm, skip find
-if hasattr(dist, "init_process_group") and n_gpus > 1:    # ROCm torch may lack this function
-    dist.init_process_group(...)
+- dist.init_process_group(...)                 # unconditional call; ROCm torch may lack this function
++ if hasattr(dist, "init_process_group") and n_gpus > 1:
++     dist.init_process_group(...)
 ```
 
-`benchmark=True` on ROCm triggers MIOpen find for every new convolution shape. Training shapes change frequently, causing continuous find overhead. `False` uses the default algorithm and skips find.
+`benchmark=True` on ROCm runs MIOpen find for every new convolution shape. Training shapes change frequently, causing continuous find overhead. `False` uses the default algorithm and skips find.
 
 ### 5. `assets/config_template.json`
 
-```json
-"precision": "bf16"
+```diff
+- "precision": "fp16"
++ "precision": "bf16"
 ```
 
-Original `fp16`; `bf16` is more stable on ROCm (same dynamic range as fp32, no loss scaling needed).
-
----
+`bf16` is more stable on ROCm (same dynamic range as fp32, no loss scaling needed).
 
 ## Parameter Constraints
 
-| Parameter | Value | Upper limit | Reason |
-|-----------|-------|-------------|--------|
+| Parameter | Value | Limit | Reason |
+|-----------|-------|-------|--------|
 | `x_center` | 5 | ≤ 5 | Actual NSF forward = x_center + 2s, threshold 7-8s |
 | `x_query` | 3 | ≤ x_center | Otherwise t-t_query < 0, empty array error |
-| `x_max` | 6 | > x_center | Split threshold (only split when audio exceeds) |
+| `x_max` | 6 | > x_center | Split threshold (only split when audio exceeds it) |
 
-`x_center` determines chunk size, not `x_max`. `x_max` is only the threshold for "when to start splitting".
+> [!TIP]
+> `x_center` determines the chunk size, not `x_max`. `x_max` is only the threshold for "when to start splitting".
 
----
+## Verified Environment
+
+| Component | Version |
+|-----------|---------|
+| GPU | AMD Radeon RX 9070 XT (gfx1201) |
+| Graphics driver | 26.2.2 or newer |
+| ROCm | 7.2.1 (Windows) |
+| PyTorch | 2.9.1+rocm7.2.1 |
+| Python | 3.12 |
+| Applio | 3.6.4 (IAHispano/Applio-RVC-Fork) |
 
 ## FAQ
 
-**Q: Why use different launch methods for inference and training?**
+<details>
+<summary><b>Why use different launch methods for inference and training?</b></summary>
 
 Inference has varying convolution shapes; MIOpen find crashes each time. Training has fixed shapes; MIOpen find caches after the first run and is faster than native convolution.
 
-**Q: `[WARNING] failed to run offload-arch: binary not found`?**
+</details>
+
+<details>
+<summary><b><code>[WARNING] failed to run offload-arch: binary not found</code>?</b></summary>
 
 Harmless warning. ROCm's GPU architecture detection tool is not found; torch uses a fallback to identify the GPU.
 
-**Q: Slight metallic/electronic sound in inference?**
+</details>
 
-Inherent characteristic of RVC voice conversion, not a configuration issue. Try lowering `index_rate` (0.3→0.1, or set to 0 to disable indexing) or switching f0 method (rmvpe→crepe).
+<details>
+<summary><b>Slight metallic/electronic sound in inference?</b></summary>
 
-**Q: How to revert patches?**
+An inherent characteristic of RVC voice conversion, not a configuration issue. Try lowering `index_rate` (0.3→0.1, or set to 0 to disable indexing) or switching the f0 method (rmvpe→crepe).
+
+</details>
+
+<details>
+<summary><b>How to revert the patches?</b></summary>
 
 The patch script backs up originals as `.bak`. Rename the following `.bak` files back:
+
 - `rvc/configs/config.py.bak` → `rvc/configs/config.py`
 - `rvc/infer/pipeline.py.bak` → `rvc/infer/pipeline.py`
 - `rvc/train/train.py.bak` → `rvc/train/train.py`
@@ -224,7 +248,7 @@ The patch script backs up originals as `.bak`. Rename the following `.bak` files
 
 Then delete `applio_cudnn_off.py`.
 
----
+</details>
 
 ## Acknowledgements
 

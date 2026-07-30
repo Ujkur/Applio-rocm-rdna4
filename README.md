@@ -1,32 +1,40 @@
-[中文](README.md) | [English](README_EN.md)
+<div align="center">
 
 # Applio ROCm RDNA4
 
-在 AMD RX 9000 系列 (gfx1201 / RDNA4) 上使用 [Applio](https://github.com/IAHispano/Applio-RVC-Fork) 的补丁指南和一键脚本。
+**让 [Applio](https://github.com/IAHispano/Applio-RVC-Fork) 在 AMD RX 9000 系列显卡（gfx1201 / RDNA4）上正常训练与推理**
 
-原版 Applio 在 RDNA4 显卡上有 5 个问题，本指南提供一键补丁脚本解决全部，另含 1 项拼接优化。
+![License](https://img.shields.io/badge/License-MIT-green)
+![Platform](https://img.shields.io/badge/Platform-Windows-0078D6)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB)
+![GPU](https://img.shields.io/badge/GPU-RX%209000%20Series%20%28gfx1201%29-ED1C24)
+![ROCm](https://img.shields.io/badge/ROCm-7.2.1-0066CC)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.9.1%2Brocm7.2.1-EE4C2C)
 
----
+[中文](README.md) · [English](README_EN.md)
 
-## 问题与解决
+</div>
 
-| # | 问题 | 严重度 | 解决方案 | 修改文件 |
-|---|------|--------|---------|---------|
-| 1 | 推理时 MIOpen 崩溃 | 严重 | 禁用 cudnn，走 ATen 原生卷积（显著提速） | `applio_cudnn_off.py` (新增) |
-| 2 | 长音频金属破音 | 严重 | `x_center=5`，NSF 前向 <7s | `rvc/configs/config.py` |
-| 3 | faiss 不支持中文路径 | 中等 | 自动复制到临时 ASCII 路径 | `rvc/infer/pipeline.py` |
+原版 Applio 在 RDNA4 显卡上存在 **5 个问题**：推理崩溃、长音频金属破音、中文路径报错、训练报错、训练慢。本仓库提供**一键补丁脚本**修复全部问题，另含 **1 项拼接音质优化**。只改代码，不涉及模型权重。
+
+## 问题与修复
+
+| # | 问题 | 严重度 | 修复方案 | 涉及文件 |
+|---|------|--------|----------|----------|
+| 1 | 推理时 MIOpen 崩溃 | 严重 | 禁用 cudnn，走 ATen 原生卷积（反而提速） | `applio_cudnn_off.py`（新增） |
+| 2 | 长音频金属破音 | 严重 | `x_center=5`，NSF 单次前向压到 7s 内 | `rvc/configs/config.py` |
+| 3 | faiss 不支持中文路径 | 中等 | 非 ASCII 路径自动复制到临时目录再加载 | `rvc/infer/pipeline.py` |
 | 4 | 训练 `init_process_group` 报错 | 严重 | `hasattr` 检查，单 GPU 跳过 | `rvc/train/train.py` |
-| 5 | 训练慢 | 中等 | `benchmark=False` 避免 MIOpen find | `rvc/train/train.py` |
+| 5 | 训练慢 | 中等 | `benchmark=False`，避免 MIOpen 反复 find | `rvc/train/train.py` |
 
-此外包含一项优化：等功率 crossfade（4096样本/85ms）替代裸 `np.concatenate`，提升块拼接过渡质量。
-
----
+> [!NOTE]
+> 另含一项音质优化：等功率 sin/cos crossfade（4096 样本 / 85ms）替代原版裸 `np.concatenate`，块拼接过渡更平滑。
 
 ## 安装步骤
 
-### Step 1 — 安装 Python 3.12
+### Step 1 · 安装 Python 3.12
 
-下载 [Python 3.12](https://www.python.org/downloads/release/python-3120/) 并安装（勾选 Add to PATH）。
+下载并安装 [Python 3.12](https://www.python.org/downloads/release/python-3120/)（勾选 **Add to PATH**），然后验证：
 
 ```cmd
 python --version
@@ -34,9 +42,10 @@ python --version
 
 确认输出 `Python 3.12.x`。
 
-### Step 2 — 安装 ROCm SDK + PyTorch
+### Step 2 · 安装 ROCm SDK + PyTorch
 
-需要 AMD 26.2.2 或更新显卡驱动（[AMD 官网下载](https://www.amd.com/en/support)）。
+> [!IMPORTANT]
+> 需要 AMD **26.2.2 或更新**的显卡驱动（[AMD 官网下载](https://www.amd.com/en/support)）。
 
 安装 ROCm SDK：
 
@@ -48,7 +57,7 @@ pip install --no-cache-dir ^
  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
 ```
 
-安装 PyTorch（ROCm 版，这一步可能需要几分钟）：
+安装 PyTorch（ROCm 版，体积较大，需要几分钟）：
 
 ```cmd
 pip install --no-cache-dir ^
@@ -57,24 +66,29 @@ pip install --no-cache-dir ^
  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
 ```
 
-验证：
+验证 GPU 识别：
 
 ```cmd
 python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-确认输出类似 `2.9.1+rocm7.2.1 True AMD Radeon RX 9070 XT`。
+预期输出类似：
 
-### Step 3 — 下载原版 Applio
+```text
+2.9.1+rocm7.2.1 True AMD Radeon RX 9070 XT
+```
+
+### Step 3 · 下载原版 Applio
 
 ```cmd
 git clone https://github.com/IAHispano/Applio-RVC-Fork.git
 cd Applio-RVC-Fork
 ```
 
-### Step 4 — 安装依赖（跳过 torch）
+### Step 4 · 安装依赖（跳过 torch）
 
-**注意**：Applio 的 `requirements.txt` 里有 `torch==2.11.0`，直接安装会覆盖刚装好的 ROCm torch，必须跳过。
+> [!WARNING]
+> Applio 的 `requirements.txt` 锁定了 `torch==2.11.0`，直接安装会**覆盖掉 Step 2 装好的 ROCm torch**，必须过滤。
 
 过滤掉 torch 相关行后安装：
 
@@ -83,20 +97,21 @@ findstr /v /b "torch==" requirements.txt | findstr /v /b "torchaudio==" | findst
 pip install -r requirements_no_torch.txt
 ```
 
-或者手动用记事本打开 `requirements.txt`，删掉 `torch==`、`torchaudio==`、`torchvision==` 开头的行，保存后 `pip install -r requirements.txt`。
+或者手动：用记事本打开 `requirements.txt`，删掉 `torch==`、`torchaudio==`、`torchvision==` 开头的行，保存后 `pip install -r requirements.txt`。
 
-### Step 5 — 下载预训练模型
+### Step 5 · 下载预训练模型
 
-Applio 需要预训练模型（HiFi-GAN 声码器等）。有两种方式：
+Applio 需要预训练模型（HiFi-GAN 声码器等），有两种方式：
 
 1. **WebUI 下载（推荐）**：启动 Applio（`python app.py --open`），在 WebUI 的「设置」→「训练」里点击下载预训练模型。
 2. **手动下载**：按照 [官方文档](https://docs.applio.org/getting-started/pretrained/) 下载，放到 `rvc/models/pretraineds/` 目录。
 
-> **⚠️ 不要运行官方 `run-install.bat`**。它会创建 Conda 环境并安装非 ROCm 版 torch，**会破坏本指南 Step 2 已装好的 ROCm torch 环境**。本指南的安装方式完全绕开了官方安装脚本。
+> [!CAUTION]
+> **不要运行官方 `run-install.bat`**。它会创建 Conda 环境并安装非 ROCm 版 torch，**破坏 Step 2 已装好的 ROCm torch 环境**。本指南的安装方式已完全绕开官方安装脚本。
 
-### Step 6 — 应用 RDNA4 补丁
+### Step 6 · 应用 RDNA4 补丁
 
-把本 repo 的两个文件复制到 Applio 目录：
+把本 repo 的两个文件复制到 Applio 目录，然后运行补丁脚本：
 
 ```cmd
 git clone https://github.com/Ujkur/Applio-rocm-rdna4.git
@@ -106,21 +121,16 @@ copy Applio-rocm-rdna4\apply_rdna4_patches.py .
 python apply_rdna4_patches.py
 ```
 
-脚本会自动修改 5 个文件，原文件备份为 `.bak`。看到 `完成!` 即表示成功。
-
----
+脚本自动修改 5 个文件，原文件备份为 `.bak`。看到 `完成!` 即表示成功。
 
 ## 使用方法
 
-### 推理（cudnn-off）
+| 场景 | 启动命令 | cudnn | 原因 |
+|------|----------|-------|------|
+| **推理** | `python applio_cudnn_off.py --open` | 关闭 | 卷积 shape 多变，MIOpen 每次 find 都会崩溃 |
+| **训练** | `python app.py --open` | 开启 | shape 固定，MIOpen find 一次后缓存，比原生卷积快 |
 
-```cmd
-python applio_cudnn_off.py --open
-```
-
-`applio_cudnn_off.py` 在启动时禁用 cudnn(MIOpen)，走 ATen 原生卷积。推理必须用这个入口——MIOpen 在 gfx1201 上会崩溃。
-
-### 训练（cudnn-on + MIOpen）
+训练前先设置 MIOpen 环境变量：
 
 ```cmd
 set MIOPEN_USER_DB_PATH=%USERPROFILE%\.miopen_applio
@@ -135,9 +145,8 @@ python app.py --open
 set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PATH%"
 ```
 
-**推理用 `applio_cudnn_off.py`（cudnn off），训练用 `app.py`（cudnn on），不要混用。** 训练用 cudnn-off 会慢，推理用 cudnn-on 会崩溃。
-
----
+> [!WARNING]
+> **两个入口不要混用**：训练用 cudnn-off 会慢，推理用 cudnn-on 会崩溃。
 
 ## 修改详解
 
@@ -147,46 +156,40 @@ set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PA
 
 ### 2. `rvc/configs/config.py`
 
-```python
-# 原版默认（每块38秒，会金属破音）
-x_pad, x_query, x_center, x_max = (1, 6, 38, 41)
-
-# RDNA4 修改（每块约5秒，安全）
-x_pad, x_query, x_center, x_max = (1, 3, 5, 6)
+```diff
+- x_pad, x_query, x_center, x_max = (1, 6, 38, 41)   # 原版：每块 38s，后段金属破音
++ x_pad, x_query, x_center, x_max = (1, 3, 5, 6)     # RDNA4：每块约 5s，安全
 ```
 
-`x_center` 决定每块大小（切点步长）。实际 NSF 前向长度 ≈ `x_center + 2s`（padding）。临界点 7-8s，超过后段金属破音。`x_center=5` 实际 7s，安全。
+`x_center` 决定每块大小（切点步长）。实际 NSF 前向长度 ≈ `x_center + 2s`（padding）。临界点 7-8s，超过后后段出现金属破音。`x_center=5` 实际 7s，安全。
 
 ### 3. `rvc/infer/pipeline.py`
 
-- **crossfade（优化）**：原版裸 `np.concatenate` → 等功率 sin/cos crossfade（4096样本/85ms），提升块拼接过渡质量
+- **crossfade（优化）**：原版裸 `np.concatenate` → 等功率 sin/cos crossfade（4096 样本 / 85ms），提升块拼接过渡质量
 - **faiss 中文路径**：`faiss.read_index` 用 C `fopen`，不支持中文/全角路径。检测到非 ASCII 路径时自动复制到临时目录再加载
 - 新增 `import tempfile, shutil`
 
 ### 4. `rvc/train/train.py`
 
-```python
-# 原版
-torch.backends.cudnn.benchmark = True       # ROCm 上每个新 shape 都 find，慢
-dist.init_process_group(...)                 # 无条件调用，ROCm torch 可能无此函数
+```diff
+- torch.backends.cudnn.benchmark = True        # ROCm 上每个新 shape 都触发 MIOpen find，慢
++ torch.backends.cudnn.benchmark = False       # 用默认算法，跳过 find
 
-# RDNA4 修改
-torch.backends.cudnn.benchmark = False                    # 用默认算法，跳过 find
-if hasattr(dist, "init_process_group") and n_gpus > 1:    # ROCm torch 可能缺失此函数
-    dist.init_process_group(...)
+- dist.init_process_group(...)                 # 无条件调用，ROCm torch 可能无此函数
++ if hasattr(dist, "init_process_group") and n_gpus > 1:
++     dist.init_process_group(...)
 ```
 
 `benchmark=True` 在 ROCm 上会对每个新卷积 shape 执行 MIOpen find 搜索最优算法，训练时 shape 频繁变化导致持续 find 开销。`False` 用默认算法跳过 find。
 
 ### 5. `assets/config_template.json`
 
-```json
-"precision": "bf16"
+```diff
+- "precision": "fp16"
++ "precision": "bf16"
 ```
 
-原版 `fp16`，ROCm 上 `bf16` 更稳定（动态范围同 fp32，无需 loss scaling）。
-
----
+`bf16` 在 ROCm 上更稳定（动态范围同 fp32，无需 loss scaling）。
 
 ## 参数约束
 
@@ -196,27 +199,48 @@ if hasattr(dist, "init_process_group") and n_gpus > 1:    # ROCm torch 可能缺
 | `x_query` | 3 | ≤ x_center | 否则切点搜索 t-t_query < 0，空数组报错 |
 | `x_max` | 6 | > x_center | 分块阈值（音频超过才分块） |
 
-`x_center` 决定每块大小，不是 `x_max`。`x_max` 只是"音频超过多少秒才分块"的阈值。
+> [!TIP]
+> `x_center` 决定每块大小，不是 `x_max`。`x_max` 只是"音频超过多少秒才分块"的阈值。
 
----
+## 已验证环境
+
+| 组件 | 版本 |
+|------|------|
+| GPU | AMD Radeon RX 9070 XT（gfx1201） |
+| 显卡驱动 | 26.2.2 或更新 |
+| ROCm | 7.2.1（Windows） |
+| PyTorch | 2.9.1+rocm7.2.1 |
+| Python | 3.12 |
+| Applio | 3.6.4（IAHispano/Applio-RVC-Fork） |
 
 ## FAQ
 
-**Q: 为什么推理和训练要用不同的启动方式？**
+<details>
+<summary><b>为什么推理和训练要用不同的启动方式？</b></summary>
 
 推理时卷积 shape 多变，MIOpen 每次 find 会崩溃。训练时 shape 固定，MIOpen find 一次后缓存，比原生卷积快。
 
-**Q: `[WARNING] failed to run offload-arch: binary not found` 怎么办？**
+</details>
+
+<details>
+<summary><b><code>[WARNING] failed to run offload-arch: binary not found</code> 怎么办？</b></summary>
 
 无害警告，不影响使用。ROCm 的 GPU 架构检测工具找不到，torch 用 fallback 识别 GPU。
 
-**Q: 推理有轻微金属音/电音？**
+</details>
+
+<details>
+<summary><b>推理有轻微金属音/电音？</b></summary>
 
 RVC 变声的固有特性，不是配置问题。可尝试降低 `index_rate`（0.3→0.1，或设为 0 完全禁用索引）或换 f0 方法（rmvpe→crepe）。
 
-**Q: 如何回退补丁？**
+</details>
+
+<details>
+<summary><b>如何回退补丁？</b></summary>
 
 补丁脚本自动备份为 `.bak`。把以下文件的 `.bak` 改回原名即可：
+
 - `rvc/configs/config.py.bak` → `rvc/configs/config.py`
 - `rvc/infer/pipeline.py.bak` → `rvc/infer/pipeline.py`
 - `rvc/train/train.py.bak` → `rvc/train/train.py`
@@ -224,11 +248,11 @@ RVC 变声的固有特性，不是配置问题。可尝试降低 `index_rate`（
 
 然后删除 `applio_cudnn_off.py`。
 
----
+</details>
 
 ## 致谢
 
-- [IAHispano/Applio-RVC-Fork](https://github.com/IAHispano/Applio-RVC-Fork) — Applio 原版 (MIT License)
+- [IAHispano/Applio-RVC-Fork](https://github.com/IAHispano/Applio-RVC-Fork) — Applio 原版（MIT License）
 - [cantascendia/rocm-rdna4-windows](https://github.com/cantascendia/rocm-rdna4-windows) — ROCm 7.2.1 + PyTorch 2.9.1 Windows 安装方法参考
 - [AMD ROCm](https://rocm.docs.amd.com/) — ROCm 7.2.1 Windows 支持
 
