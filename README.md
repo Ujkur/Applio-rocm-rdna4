@@ -2,9 +2,9 @@
 
 # Applio ROCm RDNA4
 
-**让 [Applio](https://github.com/IAHispano/Applio-RVC-Fork) 在 AMD RX 9000 系列显卡（gfx1201 / RDNA4）上正常训练与推理**
+**让 [Applio](https://github.com/IAHispano/Applio) 在 AMD RX 9000 系列显卡（gfx1201 / RDNA4）上正常训练与推理**
 
-![License](https://img.shields.io/badge/License-MIT-green)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 ![GPU](https://img.shields.io/badge/GPU-RX%209000%20Series%20%28gfx1201%29-ED1C24)
@@ -22,7 +22,7 @@
 | # | 问题 | 严重度 | 修复方案 | 涉及文件 |
 |---|------|--------|----------|----------|
 | 1 | 推理时 MIOpen 崩溃 | 严重 | 禁用 cudnn，走 ATen 原生卷积（反而提速） | `applio_cudnn_off.py`（新增） |
-| 2 | 长音频金属破音 | 严重 | `x_center=5`，NSF 单次前向压到 7s 内 | `rvc/configs/config.py` |
+| 2 | 长音频金属破音 | 严重 | `x_center=5`，NSF 单次前向 ≈7s（临界 7-8s） | `rvc/configs/config.py` |
 | 3 | faiss 不支持中文路径 | 中等 | 非 ASCII 路径自动复制到临时目录再加载 | `rvc/infer/pipeline.py` |
 | 4 | 训练 `init_process_group` 报错 | 严重 | `hasattr` 检查，单 GPU 跳过 | `rvc/train/train.py` |
 | 5 | 训练慢 | 中等 | `benchmark=False`，避免 MIOpen 反复 find | `rvc/train/train.py` |
@@ -81,9 +81,12 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available(), tor
 ### Step 3 · 下载原版 Applio
 
 ```cmd
-git clone https://github.com/IAHispano/Applio-RVC-Fork.git
-cd Applio-RVC-Fork
+git clone -b 3.6.4 --depth 1 https://github.com/IAHispano/Applio.git
+cd Applio
 ```
+
+> [!NOTE]
+> 补丁脚本按 **3.6.4** 的源码精确匹配，请用 `-b 3.6.4` 锁定版本。上游仓库已改名为 `IAHispano/Applio`（旧名 `Applio-RVC-Fork` 会重定向）。其他版本可能导致补丁不命中——脚本会明确警告而不是静默失败。
 
 ### Step 4 · 安装依赖（跳过 torch）
 
@@ -121,7 +124,7 @@ copy Applio-rocm-rdna4\apply_rdna4_patches.py .
 python apply_rdna4_patches.py
 ```
 
-脚本自动修改 5 个文件，原文件备份为 `.bak`。看到 `完成!` 即表示成功。
+脚本自动修改 4 个文件（原文件备份为 `.bak`），并确认 `applio_cudnn_off.py` 就位。看到 `完成!` 即表示成功；若某处未命中（通常是 Applio 版本不对），脚本会明确列出问题并以非零码退出。脚本可重复运行，已打过的补丁会自动跳过。
 
 ## 使用方法
 
@@ -161,7 +164,7 @@ set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PA
 + x_pad, x_query, x_center, x_max = (1, 3, 5, 6)     # RDNA4：每块约 5s，安全
 ```
 
-`x_center` 决定每块大小（切点步长）。实际 NSF 前向长度 ≈ `x_center + 2s`（padding）。临界点 7-8s，超过后后段出现金属破音。`x_center=5` 实际 7s，安全。
+`x_center` 决定每块大小（切点步长）。实际 NSF 前向长度 ≈ `x_center + 2s`（padding）。临界点 7-8s，超过后后段出现金属破音。`x_center=5` 实际 7s，安全。`config.py` 里有两处该参数（默认档和低显存档 `(1, 5, 30, 32)`），脚本会一并替换。
 
 ### 3. `rvc/infer/pipeline.py`
 
@@ -175,12 +178,14 @@ set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PA
 - torch.backends.cudnn.benchmark = True        # ROCm 上每个新 shape 都触发 MIOpen find，慢
 + torch.backends.cudnn.benchmark = False       # 用默认算法，跳过 find
 
-- dist.init_process_group(...)                 # 无条件调用，ROCm torch 可能无此函数
-+ if hasattr(dist, "init_process_group") and n_gpus > 1:
+- dist.init_process_group(...)                 # 无条件调用，ROCm torch 无此函数，必崩
++ if hasattr(dist, "init_process_group") and n_gpus > 1 and device.type == "cuda":
 +     dist.init_process_group(...)
 ```
 
 `benchmark=True` 在 ROCm 上会对每个新卷积 shape 执行 MIOpen find 搜索最优算法，训练时 shape 频繁变化导致持续 find 开销。`False` 用默认算法跳过 find。
+
+ROCm Windows 版 torch 不含 `torch.distributed`（实测 `dist.is_available()` 为 `False`），原版的无条件调用会直接 `AttributeError`。守卫条件与下方 DDP 包装的条件（`n_gpus > 1 and device.type == "cuda"`）保持一致，单 GPU 跳过初始化无任何影响。
 
 ### 5. `assets/config_template.json`
 
@@ -211,7 +216,7 @@ set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PA
 | ROCm | 7.2.1（Windows） |
 | PyTorch | 2.9.1+rocm7.2.1 |
 | Python | 3.12 |
-| Applio | 3.6.4（IAHispano/Applio-RVC-Fork） |
+| Applio | 3.6.4（IAHispano/Applio） |
 
 ## FAQ
 
@@ -252,10 +257,10 @@ RVC 变声的固有特性，不是配置问题。可尝试降低 `index_rate`（
 
 ## 致谢
 
-- [IAHispano/Applio-RVC-Fork](https://github.com/IAHispano/Applio-RVC-Fork) — Applio 原版（MIT License）
+- [IAHispano/Applio](https://github.com/IAHispano/Applio) — Applio 原版（MIT License，旧名 Applio-RVC-Fork）
 - [cantascendia/rocm-rdna4-windows](https://github.com/cantascendia/rocm-rdna4-windows) — ROCm 7.2.1 + PyTorch 2.9.1 Windows 安装方法参考
 - [AMD ROCm](https://rocm.docs.amd.com/) — ROCm 7.2.1 Windows 支持
 
 ## License
 
-MIT
+[MIT](LICENSE)
