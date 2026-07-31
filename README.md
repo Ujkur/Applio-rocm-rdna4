@@ -126,6 +126,29 @@ python apply_rdna4_patches.py
 
 脚本自动修改 4 个文件（原文件备份为 `.bak`），并确认 `applio_cudnn_off.py` 就位。看到 `完成!` 即表示成功；若某处未命中（通常是 Applio 版本不对），脚本会明确列出问题并以非零码退出。脚本可重复运行，已打过的补丁会自动跳过。
 
+## 验证安装
+
+本 repo 自带 4 个测试脚本，用来确认环境、补丁、推理路径、训练路径都正常。全部 `[PASS]`（退出码 0）即通过：
+
+| 脚本 | 验证内容 | 运行位置 |
+|------|----------|----------|
+| `tests/check_environment.py` | Python 3.12、ROCm torch、GPU 识别、bf16 计算 | 任意目录 |
+| `tests/check_patches.py` | 5 项补丁全部落点、patched 文件可编译、faiss 中文路径实测 | Applio 根目录（或把路径作为参数传入） |
+| `tests/check_inference.py` | 推理路径：cudnn-off + 变 shape 卷积 + bf16 | 任意目录 |
+| `tests/check_training.py` | 训练路径：cudnn-on + MIOpen + bf16 真实训练步 | 任意目录 |
+
+在 Applio 根目录下运行（假设本 repo 已按 Step 6 clone 到 `Applio-rocm-rdna4\` 子目录）：
+
+```cmd
+python Applio-rocm-rdna4\tests\check_environment.py
+python Applio-rocm-rdna4\tests\check_patches.py .
+python Applio-rocm-rdna4\tests\check_inference.py
+python Applio-rocm-rdna4\tests\check_training.py
+```
+
+> [!TIP]
+> `check_training.py` 会自动设置 MIOpen 环境变量并探测 LLVM 路径，不需要先手动 set。`check_patches.py` 不带参数时默认检查当前目录。
+
 ## 使用方法
 
 | 场景 | 启动命令 | cudnn | 原因 |
