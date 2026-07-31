@@ -2,9 +2,9 @@
 
 # Applio ROCm RDNA4
 
-**Run [Applio](https://github.com/IAHispano/Applio-RVC-Fork) training and inference on AMD RX 9000 series GPUs (gfx1201 / RDNA4)**
+**Run [Applio](https://github.com/IAHispano/Applio) training and inference on AMD RX 9000 series GPUs (gfx1201 / RDNA4)**
 
-![License](https://img.shields.io/badge/License-MIT-green)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 ![GPU](https://img.shields.io/badge/GPU-RX%209000%20Series%20%28gfx1201%29-ED1C24)
@@ -22,7 +22,7 @@ The original Applio has **5 issues** on RDNA4 GPUs: inference crashes, metallic 
 | # | Issue | Severity | Fix | Modified File |
 |---|-------|----------|-----|---------------|
 | 1 | MIOpen crash during inference | Critical | Disable cudnn, use ATen native convolution (actually faster) | `applio_cudnn_off.py` (new) |
-| 2 | Metallic artifacts on long audio | Critical | `x_center=5`, keep each NSF forward under 7s | `rvc/configs/config.py` |
+| 2 | Metallic artifacts on long audio | Critical | `x_center=5`, each NSF forward ≈7s (threshold 7-8s) | `rvc/configs/config.py` |
 | 3 | faiss doesn't support CJK paths | Medium | Auto-copy non-ASCII paths to a temp dir before loading | `rvc/infer/pipeline.py` |
 | 4 | Training `init_process_group` error | Critical | `hasattr` check, skip for single GPU | `rvc/train/train.py` |
 | 5 | Slow training | Medium | `benchmark=False` to avoid repeated MIOpen find | `rvc/train/train.py` |
@@ -81,9 +81,12 @@ Expected output similar to:
 ### Step 3 · Download the original Applio
 
 ```cmd
-git clone https://github.com/IAHispano/Applio-RVC-Fork.git
-cd Applio-RVC-Fork
+git clone -b 3.6.4 --depth 1 https://github.com/IAHispano/Applio.git
+cd Applio
 ```
+
+> [!NOTE]
+> The patch script matches the **3.6.4** source code exactly, so pin the version with `-b 3.6.4`. The upstream repo has been renamed to `IAHispano/Applio` (the old name `Applio-RVC-Fork` redirects). Other versions may cause patch misses — the script will warn explicitly instead of failing silently.
 
 ### Step 4 · Install dependencies (skip torch)
 
@@ -121,7 +124,7 @@ copy Applio-rocm-rdna4\apply_rdna4_patches.py .
 python apply_rdna4_patches.py
 ```
 
-The script automatically modifies 5 files and backs up the originals as `.bak`. Seeing `完成!` (Done) means success.
+The script automatically modifies 4 files (backing up originals as `.bak`) and confirms `applio_cudnn_off.py` is in place. Seeing `完成!` (Done) means success; if any pattern misses (usually a wrong Applio version), the script lists the problem and exits with a non-zero code. The script is idempotent — already-applied patches are skipped on re-run.
 
 ## Usage
 
@@ -161,7 +164,7 @@ Inference entry script that executes `torch.backends.cudnn.enabled = False` befo
 + x_pad, x_query, x_center, x_max = (1, 3, 5, 6)     # RDNA4: ~5s per chunk, safe
 ```
 
-`x_center` determines the chunk size (split step). Actual NSF forward length ≈ `x_center + 2s` (padding). The critical threshold is 7-8s; beyond that the latter part develops metallic artifacts. `x_center=5` gives an actual 7s, safe.
+`x_center` determines the chunk size (split step). Actual NSF forward length ≈ `x_center + 2s` (padding). The critical threshold is 7-8s; beyond that the latter part develops metallic artifacts. `x_center=5` gives an actual 7s, safe. `config.py` contains this parameter in two places (the default tier and the low-VRAM tier `(1, 5, 30, 32)`); the script replaces both.
 
 ### 3. `rvc/infer/pipeline.py`
 
@@ -175,12 +178,14 @@ Inference entry script that executes `torch.backends.cudnn.enabled = False` befo
 - torch.backends.cudnn.benchmark = True        # on ROCm, triggers MIOpen find for every new shape, slow
 + torch.backends.cudnn.benchmark = False       # use default algorithm, skip find
 
-- dist.init_process_group(...)                 # unconditional call; ROCm torch may lack this function
-+ if hasattr(dist, "init_process_group") and n_gpus > 1:
+- dist.init_process_group(...)                 # unconditional call; ROCm torch lacks this function, crashes
++ if hasattr(dist, "init_process_group") and n_gpus > 1 and device.type == "cuda":
 +     dist.init_process_group(...)
 ```
 
 `benchmark=True` on ROCm runs MIOpen find for every new convolution shape. Training shapes change frequently, causing continuous find overhead. `False` uses the default algorithm and skips find.
+
+The ROCm Windows build of torch ships without `torch.distributed` (verified: `dist.is_available()` returns `False`), so the original unconditional call raises `AttributeError`. The guard mirrors the DDP-wrapping condition below it (`n_gpus > 1 and device.type == "cuda"`), so skipping initialization on a single GPU has no side effects.
 
 ### 5. `assets/config_template.json`
 
@@ -211,7 +216,7 @@ Inference entry script that executes `torch.backends.cudnn.enabled = False` befo
 | ROCm | 7.2.1 (Windows) |
 | PyTorch | 2.9.1+rocm7.2.1 |
 | Python | 3.12 |
-| Applio | 3.6.4 (IAHispano/Applio-RVC-Fork) |
+| Applio | 3.6.4 (IAHispano/Applio) |
 
 ## FAQ
 
@@ -252,10 +257,10 @@ Then delete `applio_cudnn_off.py`.
 
 ## Acknowledgements
 
-- [IAHispano/Applio-RVC-Fork](https://github.com/IAHispano/Applio-RVC-Fork) — Original Applio (MIT License)
+- [IAHispano/Applio](https://github.com/IAHispano/Applio) — Original Applio (MIT License, formerly Applio-RVC-Fork)
 - [cantascendia/rocm-rdna4-windows](https://github.com/cantascendia/rocm-rdna4-windows) — ROCm 7.2.1 + PyTorch 2.9.1 Windows installation reference
 - [AMD ROCm](https://rocm.docs.amd.com/) — ROCm 7.2.1 Windows support
 
 ## License
 
-MIT
+[MIT](LICENSE)
