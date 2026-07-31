@@ -126,6 +126,29 @@ python apply_rdna4_patches.py
 
 The script automatically modifies 4 files (backing up originals as `.bak`) and confirms `applio_cudnn_off.py` is in place. Seeing `完成!` (Done) means success; if any pattern misses (usually a wrong Applio version), the script lists the problem and exits with a non-zero code. The script is idempotent — already-applied patches are skipped on re-run.
 
+## Verifying the Installation
+
+This repo ships 4 test scripts to confirm the environment, the patches, and the inference/training paths all work. All `[PASS]` (exit code 0) means success:
+
+| Script | What it verifies | Where to run |
+|--------|------------------|--------------|
+| `tests/check_environment.py` | Python 3.12, ROCm torch, GPU detection, bf16 compute | Any directory |
+| `tests/check_patches.py` | All 5 patches in place, patched files compile, live faiss CJK-path test | Applio root (or pass the path as an argument) |
+| `tests/check_inference.py` | Inference path: cudnn-off + varying-shape convs + bf16 | Any directory |
+| `tests/check_training.py` | Training path: cudnn-on + MIOpen + real bf16 training steps | Any directory |
+
+Run from the Applio root (assuming this repo was cloned into the `Applio-rocm-rdna4\` subdirectory per Step 6):
+
+```cmd
+python Applio-rocm-rdna4\tests\check_environment.py
+python Applio-rocm-rdna4\tests\check_patches.py .
+python Applio-rocm-rdna4\tests\check_inference.py
+python Applio-rocm-rdna4\tests\check_training.py
+```
+
+> [!TIP]
+> `check_training.py` sets the MIOpen environment variables and detects the LLVM path automatically — no manual `set` needed. Without an argument, `check_patches.py` checks the current directory.
+
 ## Usage
 
 | Scenario | Launch command | cudnn | Why |
