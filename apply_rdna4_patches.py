@@ -45,9 +45,12 @@ def main():
     print("=" * 50)
 
     # 1. config.py: x_center=5
+    # 注意：config.py 里有两处该参数（默认档 (1,6,38,41) 和低显存档 (1,5,30,32)），
+    # 两处都必须替换（README 已明确记录此行为），所以这里不能用 count=1。
     p = "rvc/configs/config.py"
     c = read(p)
-    if "(1, 3, 5, 6)" in c:
+    presets = re.findall(r"x_pad, x_query, x_center, x_max = \([^)]+\)", c)
+    if presets and all(preset.endswith("(1, 3, 5, 6)") for preset in presets):
         print("[1/5] config.py: 已是 (1,3,5,6)，跳过")
     else:
         backup(p)
@@ -55,7 +58,6 @@ def main():
             r"x_pad, x_query, x_center, x_max = \([^)]+\)",
             "x_pad, x_query, x_center, x_max = (1, 3, 5, 6)",
             c,
-            count=1,
         )
         if n == 0:
             WARNINGS.append("config.py: 未找到分块参数（Applio 版本可能不是 3.6.4）")
