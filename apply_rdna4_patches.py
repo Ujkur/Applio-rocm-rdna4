@@ -26,11 +26,14 @@ def write(path, content):
 
 
 def replace_checked(content, old, new, label):
-    """精确替换并校验命中；未命中时记录警告而不是静默跳过。"""
-    if old not in content:
+    """精确替换并校验命中；仅替换第一处，多处匹配时记录警告而不是全部替换。"""
+    count = content.count(old)
+    if count == 0:
         WARNINGS.append(label + ": 未找到目标代码（Applio 版本可能不是 3.6.4，请手动检查）")
         return content
-    return content.replace(old, new)
+    if count > 1:
+        WARNINGS.append(label + f": 找到 {count} 处匹配，仅替换第一处，请手动检查其余位置")
+    return content.replace(old, new, 1)
 
 
 def main():
@@ -52,6 +55,7 @@ def main():
             r"x_pad, x_query, x_center, x_max = \([^)]+\)",
             "x_pad, x_query, x_center, x_max = (1, 3, 5, 6)",
             c,
+            count=1,
         )
         if n == 0:
             WARNINGS.append("config.py: 未找到分块参数（Applio 版本可能不是 3.6.4）")
@@ -72,16 +76,19 @@ def main():
         )
         changed |= c2 != c
         c = c2
+    # 注意：幂等性检测保留 "fade_len"——它能同时识别脚本打的补丁和手动打过的补丁，
+    # 避免对已打补丁的安装重复套用导致嵌套损坏。
     if "fade_len" in c:
         print("[2/5] pipeline.py: crossfade 已存在，跳过")
     else:
         old_concat = "        audio_opt = np.concatenate(audio_opt)"
         new_crossfade = '''        # RDNA4: 等功率crossfade(4096/85ms) 替代裸concatenate
+        audio_opt = [np.asarray(chunk) for chunk in audio_opt]
         if len(audio_opt) > 1:
             min_chunk_len = min(len(chunk) for chunk in audio_opt)
             fade_len = min(4096, min_chunk_len // 3)
             if fade_len >= 2:
-                result = audio_opt[0].copy()
+                result = np.array(audio_opt[0], copy=True)
                 for i in range(1, len(audio_opt)):
                     next_chunk = audio_opt[i]
                     fade_t = np.linspace(0, np.pi / 2, fade_len)
@@ -93,7 +100,7 @@ def main():
             else:
                 audio_opt = np.concatenate(audio_opt)
         else:
-            audio_opt = audio_opt[0]'''
+            audio_opt = np.array(audio_opt[0], copy=True)'''
         c2 = replace_checked(c, old_concat, new_crossfade, "pipeline.py crossfade")
         changed |= c2 != c
         c = c2
@@ -105,10 +112,12 @@ def main():
                     file_index.encode("ascii")
                 except UnicodeEncodeError:
                     tmp_dir = tempfile.mkdtemp(prefix="faiss_")
-                    ascii_path = os.path.join(tmp_dir, "index")
-                    shutil.copy2(file_index, ascii_path)
-                    index = faiss.read_index(ascii_path)
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    try:
+                        ascii_path = os.path.join(tmp_dir, "index")
+                        shutil.copy2(file_index, ascii_path)
+                        index = faiss.read_index(ascii_path)
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
                 else:
                     index = faiss.read_index(file_index)
                 big_npy = index.reconstruct_n'''
@@ -135,17 +144,34 @@ def main():
         )
         changed |= c2 != c
         c = c2
-    if 'hasattr(dist, "init_process_group")' in c:
+    # 两种守卫写法都视为已打补丁（hasattr 为本脚本写法，dist.is_available 为手动补丁常见写法）
+    if 'hasattr(dist, "init_process_group")' in c or "dist.is_available()" in c:
         print("       train.py: distributed 条件已存在，跳过")
     else:
-        c, n = re.subn(
-            r"(\s+)dist\.init_process_group\(",
-            r'\1if hasattr(dist, "init_process_group") and n_gpus > 1 and device.type == "cuda":\n\1    dist.init_process_group(',
+        # 匹配整个 dist.init_process_group(...) 调用块（含多行），统一重缩进后再加 if 守卫，
+        # 避免只给首行加缩进造成的错误层级。
+        m = re.search(
+            r"^([ \t]*)dist\.init_process_group\(.*?\n\1\)",
             c,
+            re.DOTALL | re.MULTILINE,
         )
-        if n == 0:
+        if m is None:
+            # 回退：单行调用写法
+            m = re.search(r"^([ \t]*)dist\.init_process_group\([^\n]*\)", c, re.MULTILINE)
+        if m is None:
             WARNINGS.append("train.py: 未找到 dist.init_process_group 调用")
-        changed |= n > 0
+        else:
+            indent = m.group(1)
+            call = m.group(0)
+            indented_call = "\n".join(
+                ("    " + line) if line.strip() else line for line in call.split("\n")
+            )
+            replacement = (
+                f'{indent}if hasattr(dist, "init_process_group") and n_gpus > 1 and device.type == "cuda":\n'
+                + indented_call
+            )
+            c = c[: m.start()] + replacement + c[m.end() :]
+            changed = True
     if changed:
         backup(p)
         write(p, c)
