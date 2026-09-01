@@ -30,9 +30,13 @@
 > [!NOTE]
 > 另含一项音质优化：等功率 sin/cos crossfade（4096 样本 / 85ms）替代原版裸 `np.concatenate`，块拼接过渡更平滑。
 
-## 安装步骤
+## 安装方法
 
-### Step 1 · 安装 Python 3.12
+> 二选一：**方法一**是手动逐步安装（适合想完全掌控每一步的进阶用户）；**方法二**是双击脚本一键完成，安装器执行的操作与方法一完全一致——自动装好 Python / ROCm / PyTorch / Applio / 补丁 / 启动器全流程，无需命令行。
+
+### 方法一：手动安装（进阶）
+
+#### Step 1 · 安装 Python 3.12
 
 下载并安装 [Python 3.12](https://www.python.org/downloads/release/python-3120/)（勾选 **Add to PATH**），然后验证：
 
@@ -42,7 +46,7 @@ python --version
 
 确认输出 `Python 3.12.x`。
 
-### Step 2 · 安装 ROCm SDK + PyTorch
+#### Step 2 · 安装 ROCm SDK + PyTorch
 
 > [!IMPORTANT]
 > 需要 AMD **26.2.2 或更新**的显卡驱动（[AMD 官网下载](https://www.amd.com/en/support)）。
@@ -78,7 +82,7 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available(), tor
 2.9.1+rocm7.2.1 True AMD Radeon RX 9070 XT
 ```
 
-### Step 3 · 下载原版 Applio
+#### Step 3 · 下载原版 Applio
 
 ```cmd
 git clone -b 3.6.4 --depth 1 https://github.com/IAHispano/Applio.git
@@ -88,7 +92,7 @@ cd Applio
 > [!NOTE]
 > 补丁脚本按 **3.6.4** 的源码精确匹配，请用 `-b 3.6.4` 锁定版本。上游仓库已改名为 `IAHispano/Applio`（旧名 `Applio-RVC-Fork` 会重定向）。其他版本可能导致补丁不命中——脚本会明确警告而不是静默失败。
 
-### Step 4 · 安装依赖（跳过 torch）
+#### Step 4 · 安装依赖（跳过 torch）
 
 > [!WARNING]
 > Applio 的 `requirements.txt` 锁定了 `torch==2.11.0`，直接安装会**覆盖掉 Step 2 装好的 ROCm torch**，必须过滤。
@@ -102,7 +106,7 @@ pip install -r requirements_no_torch.txt
 
 或者手动：用记事本打开 `requirements.txt`，删掉 `torch==`、`torchaudio==`、`torchvision==` 开头的行，保存后 `pip install -r requirements.txt`。
 
-### Step 5 · 下载预训练模型
+#### Step 5 · 下载预训练模型
 
 Applio 需要预训练模型（HiFi-GAN 声码器等），有两种方式：
 
@@ -112,7 +116,7 @@ Applio 需要预训练模型（HiFi-GAN 声码器等），有两种方式：
 > [!CAUTION]
 > **不要运行官方 `run-install.bat`**。它会创建 Conda 环境并安装非 ROCm 版 torch，**破坏 Step 2 已装好的 ROCm torch 环境**。本指南的安装方式已完全绕开官方安装脚本。
 
-### Step 6 · 应用 RDNA4 补丁
+#### Step 6 · 应用 RDNA4 补丁
 
 把本 repo 的两个文件复制到 Applio 目录，然后运行补丁脚本：
 
@@ -126,6 +130,30 @@ python apply_rdna4_patches.py
 
 脚本自动修改 4 个文件（原文件备份为 `.bak`），并确认 `applio_cudnn_off.py` 就位。看到 `完成!` 即表示成功；若某处未命中（通常是 Applio 版本不对），脚本会明确列出问题并以非零码退出。脚本可重复运行，已打过的补丁会自动跳过。
 
+### 方法二：一键安装（推荐）
+
+> 双击一个脚本自动完成全部安装，全程无需命令行。支持断点续传与重复运行——中断后重新双击即可，已完成的步骤会自动跳过。
+
+**前提**：Windows 10/11 64 位 · AMD RX 9000 系列显卡 · [驱动 ≥ 26.2.2](https://www.amd.com/en/support) · 约 20 GB 磁盘 · 全程联网（首次下载约 3 GB，安装后约 10 GB）
+
+1. 点击本页绿色 **Code** 按钮 → **Download ZIP**，解压到任意位置（或直接 `git clone` 本仓库）
+2. 双击解压目录里的 **install.bat**
+   - 若弹出「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」
+   - 全程自动，约 20–60 分钟（取决于网速），期间请勿关闭窗口
+3. 桌面出现两个图标，**注意不要混用**：
+
+| 图标 | 用途 | 内部行为 |
+|---|---|---|
+| **Applio 推理** | 变声 / 推理 | `applio_cudnn_off.py`，cudnn 关闭 |
+| **Applio 训练** | 训练模型 | `app.py`，cudnn 开启 + MIOpen 环境变量自动注入 |
+
+安装器把 Python 3.12、ROCm 7.2.1、PyTorch 2.9.1+rocm、Applio 3.6.4、全部依赖与 RDNA4 补丁装进一个独立目录（默认 `C:\Applio-RDNA4`）。**不修改系统 Python、不写 PATH、不动注册表、不需要管理员权限**，删除目录即完全卸载。安装成功后自动删除下载缓存目录（`C:\Applio-RDNA4-cache`），释放约 2.5 GB 空间。
+
+- 自定义安装位置：`install.bat D:\Applio-RDNA4`
+- 卸载：双击 `uninstall.bat`
+- 安装中断：直接重新运行 `install.bat`，大文件断点续传
+- 预训练模型：首次启动后在 WebUI「设置 → 训练」里下载（启动器已内置 hf-mirror 国内镜像，一般可直接成功；失败需科学上网）
+
 ## 验证安装
 
 本 repo 自带 4 个测试脚本，用来确认环境、补丁、推理路径、训练路径都正常。全部 `[PASS]`（退出码 0）即通过：
@@ -137,7 +165,7 @@ python apply_rdna4_patches.py
 | `tests/check_inference.py` | 推理路径：cudnn-off + 变 shape 卷积 + bf16 | 任意目录 |
 | `tests/check_training.py` | 训练路径：cudnn-on + MIOpen + bf16 真实训练步 | 任意目录 |
 
-在 Applio 根目录下运行（假设本 repo 已按 Step 6 clone 到 `Applio-rocm-rdna4\` 子目录）：
+在 Applio 根目录下运行（假设本 repo 已按方法一 Step 6 clone 到 `Applio-rocm-rdna4\` 子目录）：
 
 ```cmd
 python Applio-rocm-rdna4\tests\check_environment.py
