@@ -76,6 +76,14 @@ def main():
     except Exception as e:
         check(False, "config_template.json precision=bf16", str(e))
 
+    # 4b. prerequisites_download.py: url_base -> hf-mirror.com (国内镜像)
+    p = os.path.join(root, "rvc", "lib", "tools", "prerequisites_download.py")
+    try:
+        c = read(p)
+        check("hf-mirror.com" in c, "prerequisites_download.py url_base hf-mirror")
+    except Exception as e:
+        check(False, "prerequisites_download.py url_base hf-mirror", str(e))
+
     # 5. cudnn-off inference entry
     check(os.path.isfile(os.path.join(root, "applio_cudnn_off.py")),
           "applio_cudnn_off.py present")
