@@ -10,6 +10,8 @@ rem  Disk : ~20 GB free  |  Net: ~3 GB download on first run
 rem  Everything goes into ONE folder. No admin rights, no PATH
 rem  changes, no registry writes. Uninstall = delete the folder.
 rem  Re-running is safe: finished steps are skipped automatically.
+rem  Download cache (<INSTDIR>-cache) is deleted on success to free
+rem  ~2.5 GB; interrupted installs keep it for resume.
 rem  ENCODING: the final install.bat is ANSI/GBK. Do NOT convert it
 rem  to UTF-8 and do NOT add "chcp 65001" - that combo desyncs the
 rem  cmd line reader after multibyte text and executes garbage
@@ -225,6 +227,11 @@ call :make_launchers
 set "RDNA4_INSTDIR=%INSTDIR%"
 powershell -NoProfile -EncodedCommand JABpAG4AcwB0ACAAPQAgACQAZQBuAHYAOgBSAEQATgBBADQAXwBJAE4AUwBUAEQASQBSAAoAJABkAGUAcwBrACAAPQAgAFsARQBuAHYAaQByAG8AbgBtAGUAbgB0AF0AOgA6AEcAZQB0AEYAbwBsAGQAZQByAFAAYQB0AGgAKAAnAEQAZQBzAGsAdABvAHAAJwApAAoAJAB3ACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIAAtAEMAbwBtAE8AYgBqAGUAYwB0ACAAVwBTAGMAcgBpAHAAdAAuAFMAaABlAGwAbAAKACQAbAAgAD0AIABAACgAQAAoACcAQQBwAHAAbABpAG8AIACoYwZ0JwAsACAAJwByAHUAbgBfAGkAbgBmAGUAcgAuAGIAYQB0ACcAKQAsACAAQAAoACcAQQBwAHAAbABpAG8AIACti8N+JwAsACAAJwByAHUAbgBfAHQAcgBhAGkAbgAuAGIAYQB0ACcAKQApAAoAZgBvAHIAZQBhAGMAaAAgACgAJABuACAAaQBuACAAJABsACkAIAB7AAoAIAAgACQAcwAgAD0AIAAkAHcALgBDAHIAZQBhAHQAZQBTAGgAbwByAHQAYwB1AHQAKABbAEkATwAuAFAAYQB0AGgAXQA6ADoAQwBvAG0AYgBpAG4AZQAoACQAZABlAHMAawAsACAAJABuAFsAMABdACAAKwAgACcALgBsAG4AawAnACkAKQAKACAAIAAkAHMALgBUAGEAcgBnAGUAdABQAGEAdABoACAAPQAgAFsASQBPAC4AUABhAHQAaABdADoAOgBDAG8AbQBiAGkAbgBlACgAJABpAG4AcwB0ACwAIAAkAG4AWwAxAF0AKQAKACAAIAAkAHMALgBXAG8AcgBrAGkAbgBnAEQAaQByAGUAYwB0AG8AcgB5ACAAPQAgACQAaQBuAHMAdAAKACAAIAAkAHMALgBJAGMAbwBuAEwAbwBjAGEAdABpAG8AbgAgAD0AIABbAEkATwAuAFAAYQB0AGgAXQA6ADoAQwBvAG0AYgBpAG4AZQAoACQAaQBuAHMAdAAsACAAJwByAHUAbgB0AGkAbQBlAFwAcAB5AHQAaABvAG4ALgBlAHgAZQAnACkACgAgACAAJABzAC4AUwBhAHYAZQAoACkACgB9AAoAVwByAGkAdABlAC0ASABvAHMAdAAgACcAIAAgAHMAaABvAHIAdABjAHUAdABzACAAbwBrACcACgBlAHgAaQB0ACAAMAAKAA==
 if errorlevel 1 echo   [提示] 快捷方式创建失败, 请直接运行安装目录下的 run_infer.bat 和 run_train.bat
+
+echo.
+echo 清理下载缓存以释放空间 ...
+if exist "%CACHE%" rd /s /q "%CACHE%" >nul 2>nul
+if not exist "%CACHE%" echo 缓存已清理, 释放约 2.5 GB 空间
 
 echo.
 echo  ==================================================
