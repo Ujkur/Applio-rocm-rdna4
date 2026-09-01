@@ -1,0 +1,7 @@
+# 成品 .bat 必须 CRLF：cmd.exe 对 LF 行尾的批处理解析 goto/label 不可靠
+# （2026-09-01 事故：ZIP 下载的 install.bat 是 LF-only，双击报错"无法正确运行"。
+#  此规则保证 git clone 与 GitHub ZIP 下载拿到的都是 CRLF）
+*.bat text eol=crlf
+
+# 模板是 UTF-8 源码，构建器负责规范化换行（输出 GBK+CRLF），保持 LF 防止 autocrlf 干扰
+builder/*.tpl.bat text eol=lf
