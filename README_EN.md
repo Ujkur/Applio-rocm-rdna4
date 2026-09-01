@@ -30,9 +30,13 @@ The original Applio has **5 issues** on RDNA4 GPUs: inference crashes, metallic 
 > [!NOTE]
 > Also includes a quality optimization: equal-power sin/cos crossfade (4096 samples / 85ms) replaces the bare `np.concatenate`, for smoother chunk stitching.
 
-## Installation
+## Installation Methods
 
-### Step 1 · Install Python 3.12
+> Pick one of the two: **Method 1** is a manual step-by-step install (for advanced users who want full control); **Method 2** is a double-click one-click installer that performs exactly the same operations — Python / ROCm / PyTorch / Applio / patches / launchers, no command line needed.
+
+### Method 1: Manual install (advanced)
+
+#### Step 1 · Install Python 3.12
 
 Download and install [Python 3.12](https://www.python.org/downloads/release/python-3120/) (check **Add to PATH**), then verify:
 
@@ -42,7 +46,7 @@ python --version
 
 Confirm the output shows `Python 3.12.x`.
 
-### Step 2 · Install ROCm SDK + PyTorch
+#### Step 2 · Install ROCm SDK + PyTorch
 
 > [!IMPORTANT]
 > Requires AMD graphics driver **26.2.2 or newer** ([download from AMD](https://www.amd.com/en/support)).
@@ -78,7 +82,7 @@ Expected output similar to:
 2.9.1+rocm7.2.1 True AMD Radeon RX 9070 XT
 ```
 
-### Step 3 · Download the original Applio
+#### Step 3 · Download the original Applio
 
 ```cmd
 git clone -b 3.6.4 --depth 1 https://github.com/IAHispano/Applio.git
@@ -88,7 +92,7 @@ cd Applio
 > [!NOTE]
 > The patch script matches the **3.6.4** source code exactly, so pin the version with `-b 3.6.4`. The upstream repo has been renamed to `IAHispano/Applio` (the old name `Applio-RVC-Fork` redirects). Other versions may cause patch misses — the script will warn explicitly instead of failing silently.
 
-### Step 4 · Install dependencies (skip torch)
+#### Step 4 · Install dependencies (skip torch)
 
 > [!WARNING]
 > Applio's `requirements.txt` pins `torch==2.11.0`. Installing it directly will **overwrite the ROCm torch from Step 2** — it must be filtered out.
@@ -102,7 +106,7 @@ pip install -r requirements_no_torch.txt
 
 Or manually: open `requirements.txt` in Notepad, delete lines starting with `torch==`, `torchaudio==`, `torchvision==`, save, then `pip install -r requirements.txt`.
 
-### Step 5 · Download pretrained models
+#### Step 5 · Download pretrained models
 
 Applio requires pretrained models (HiFi-GAN vocoder, etc.). Two options:
 
@@ -112,7 +116,7 @@ Applio requires pretrained models (HiFi-GAN vocoder, etc.). Two options:
 > [!CAUTION]
 > **Do not run the official `run-install.bat`**. It creates a Conda environment and installs a non-ROCm torch, **breaking the ROCm torch environment set up in Step 2**. This guide completely bypasses the official install script.
 
-### Step 6 · Apply RDNA4 patches
+#### Step 6 · Apply RDNA4 patches
 
 Copy the two files from this repo into the Applio directory, then run the patch script:
 
@@ -126,6 +130,30 @@ python apply_rdna4_patches.py
 
 The script automatically modifies 4 files (backing up originals as `.bak`) and confirms `applio_cudnn_off.py` is in place. Seeing `完成!` (Done) means success; if any pattern misses (usually a wrong Applio version), the script lists the problem and exits with a non-zero code. The script is idempotent — already-applied patches are skipped on re-run.
 
+### Method 2: One-click install (recommended)
+
+> Double-click a single script and everything installs automatically — no command line needed. Supports resume: if interrupted, just run it again; finished steps are skipped automatically.
+
+**Requirements**: Windows 10/11 64-bit · AMD RX 9000 series GPU · [driver ≥ 26.2.2](https://www.amd.com/en/support) · ~20 GB disk · internet (first run downloads ~3 GB, ~10 GB installed)
+
+1. Click the green **Code** button → **Download ZIP**, extract anywhere (or `git clone` this repo)
+2. Double-click **install.bat** in the extracted folder
+   - If "Windows protected your PC" appears: click "More info" → "Run anyway"
+   - Fully automatic, ~20–60 minutes depending on network speed
+3. Two desktop shortcuts appear — **do not mix them up**:
+
+| Shortcut | Use | Internals |
+|---|---|---|
+| **Applio 推理 (Inference)** | voice conversion | `applio_cudnn_off.py`, cudnn off |
+| **Applio 训练 (Training)** | model training | `app.py`, cudnn on + MIOpen env auto-set |
+
+The installer puts Python 3.12, ROCm 7.2.1, PyTorch 2.9.1+rocm, Applio 3.6.4, all dependencies and the RDNA4 patches into one self-contained folder (default `C:\Applio-RDNA4`). **No system Python changes, no PATH writes, no registry, no admin rights** — delete the folder to fully uninstall. On success the download cache folder (`C:\Applio-RDNA4-cache`) is automatically deleted, freeing ~2.5 GB.
+
+- Custom location: `install.bat D:\Applio-RDNA4`
+- Uninstall: double-click `uninstall.bat`
+- Interrupted install: just run `install.bat` again (downloads resume)
+- Pretrained models: download inside the WebUI after first launch (hf-mirror is preconfigured for users in China)
+
 ## Verifying the Installation
 
 This repo ships 4 test scripts to confirm the environment, the patches, and the inference/training paths all work. All `[PASS]` (exit code 0) means success:
@@ -137,7 +165,7 @@ This repo ships 4 test scripts to confirm the environment, the patches, and the 
 | `tests/check_inference.py` | Inference path: cudnn-off + varying-shape convs + bf16 | Any directory |
 | `tests/check_training.py` | Training path: cudnn-on + MIOpen + real bf16 training steps | Any directory |
 
-Run from the Applio root (assuming this repo was cloned into the `Applio-rocm-rdna4\` subdirectory per Step 6):
+Run from the Applio root (assuming this repo was cloned into the `Applio-rocm-rdna4\` subdirectory per Step 6 of Method 1):
 
 ```cmd
 python Applio-rocm-rdna4\tests\check_environment.py
