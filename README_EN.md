@@ -26,6 +26,7 @@ The original Applio has **5 issues** on RDNA4 GPUs: inference crashes, metallic 
 | 3 | faiss doesn't support CJK paths | Medium | Auto-copy non-ASCII paths to a temp dir before loading | `rvc/infer/pipeline.py` |
 | 4 | Training `init_process_group` error | Critical | `hasattr` check, skip for single GPU | `rvc/train/train.py` |
 | 5 | Slow training | Medium | `benchmark=False` to avoid repeated MIOpen find | `rvc/train/train.py` |
+| 6 | Prerequisite download times out on first launch (China network) | Critical | prerequisites download source switched to hf-mirror.com | `rvc/lib/tools/prerequisites_download.py` |
 
 > [!NOTE]
 > Also includes a quality optimization: equal-power sin/cos crossfade (4096 samples / 85ms) replaces the bare `np.concatenate`, for smoother chunk stitching.
@@ -152,7 +153,7 @@ The installer puts Python 3.12, ROCm 7.2.1, PyTorch 2.9.1+rocm, Applio 3.6.4, al
 - Custom location: `install.bat D:\Applio-RDNA4`
 - Uninstall: double-click `uninstall.bat`
 - Interrupted install: just run `install.bat` again (downloads resume)
-- Pretrained models: download inside the WebUI after first launch (hf-mirror is preconfigured for users in China)
+- Pretrained models: the patch points the prerequisites download source at hf-mirror.com (China mirror); they are downloaded automatically on first launch (~1 GB, incl. rmvpe/ContentVec/ffmpeg/HiFi-GAN). If it still fails, a VPN is needed.
 
 ## Verifying the Installation
 
@@ -161,7 +162,7 @@ This repo ships 4 test scripts to confirm the environment, the patches, and the 
 | Script | What it verifies | Where to run |
 |--------|------------------|--------------|
 | `tests/check_environment.py` | Python 3.12, ROCm torch, GPU detection, bf16 compute | Any directory |
-| `tests/check_patches.py` | All 5 patches in place, patched files compile, live faiss CJK-path test | Applio root (or pass the path as an argument) |
+| `tests/check_patches.py` | All 6 patches in place, patched files compile, live faiss CJK-path test | Applio root (or pass the path as an argument) |
 | `tests/check_inference.py` | Inference path: cudnn-off + varying-shape convs + bf16 | Any directory |
 | `tests/check_training.py` | Training path: cudnn-on + MIOpen + real bf16 training steps | Any directory |
 

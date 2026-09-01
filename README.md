@@ -26,6 +26,7 @@
 | 3 | faiss 不支持中文路径 | 中等 | 非 ASCII 路径自动复制到临时目录再加载 | `rvc/infer/pipeline.py` |
 | 4 | 训练 `init_process_group` 报错 | 严重 | `hasattr` 检查，单 GPU 跳过 | `rvc/train/train.py` |
 | 5 | 训练慢 | 中等 | `benchmark=False`，避免 MIOpen 反复 find | `rvc/train/train.py` |
+| 6 | 首次启动预训练下载超时（国内网络） | 严重 | prerequisites 下载源改走 hf-mirror.com 国内镜像 | `rvc/lib/tools/prerequisites_download.py` |
 
 > [!NOTE]
 > 另含一项音质优化：等功率 sin/cos crossfade（4096 样本 / 85ms）替代原版裸 `np.concatenate`，块拼接过渡更平滑。
@@ -152,7 +153,7 @@ python apply_rdna4_patches.py
 - 自定义安装位置：`install.bat D:\Applio-RDNA4`
 - 卸载：双击 `uninstall.bat`
 - 安装中断：直接重新运行 `install.bat`，大文件断点续传
-- 预训练模型：首次启动后在 WebUI「设置 → 训练」里下载（启动器已内置 hf-mirror 国内镜像，一般可直接成功；失败需科学上网）
+- 预训练模型：补丁已把 prerequisites 下载源指向 hf-mirror.com 国内镜像，首次启动自动下载（含 rmvpe/ContentVec/ffmpeg/HiFi-GAN 等，约 1 GB）；若仍失败需科学上网
 
 ## 验证安装
 
@@ -161,7 +162,7 @@ python apply_rdna4_patches.py
 | 脚本 | 验证内容 | 运行位置 |
 |------|----------|----------|
 | `tests/check_environment.py` | Python 3.12、ROCm torch、GPU 识别、bf16 计算 | 任意目录 |
-| `tests/check_patches.py` | 5 项补丁全部落点、patched 文件可编译、faiss 中文路径实测 | Applio 根目录（或把路径作为参数传入） |
+| `tests/check_patches.py` | 6 项补丁全部落点、patched 文件可编译、faiss 中文路径实测 | Applio 根目录（或把路径作为参数传入） |
 | `tests/check_inference.py` | 推理路径：cudnn-off + 变 shape 卷积 + bf16 | 任意目录 |
 | `tests/check_training.py` | 训练路径：cudnn-on + MIOpen + bf16 真实训练步 | 任意目录 |
 
