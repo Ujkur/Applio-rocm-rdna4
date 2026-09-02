@@ -267,15 +267,18 @@ def main():
     else:
         WARNINGS.append("applio_cudnn_off.py 不在当前目录，请从本 repo 复制后再运行推理")
 
-    # 8. train.py: 训练 NaN 守卫
-    # 上游 Applio/RVC 训练循环没有梯度裁剪和 NaN 保护：一步坏梯度经 Adam 一步污染
-    # 全部权重，不可逆（RX 9070 XT + ROCm 7.2.1 + bf16 实测：epoch 11-20 间暴毙，
-    # 457/457 张量 NaN。TB 曲线中途"变平"是 NaN 点不渲染的假象；试听静音 +
-    # summary.py "invalid value encountered in cast" 警告都是死后症状）。
+    # 8. train.py: 训练稳定套装（NaN 守卫 + 梯度裁剪 + DataLoader 单进程）
+    # 上游训练循环没有梯度裁剪/NaN 保护。实测（2026-09-03，同一素材在 ROCm 7.2.1 与
+    # ROCm 10.0 均崩于 epoch ~13-20，与栈无关）崩溃分两种：
+    # A 型：一步坏梯度经 Adam 一步污染全部权重（NaN 守卫可防）；
+    # B 型：小数据集 GAN 记忆崩溃（d/adv→0.3、g/total 翻倍，判别器背完数据集）——
+    #      本补丁的梯度裁剪能压制早期尖峰，根治需 train.py 顶部 d_lr_coeff=0.5 + 素材净化
+    #      （详见 README 修改详解 #4，未写入默认补丁以免改变大数据集用户的训练动态）。
+    # DataLoader num_workers=0 保 Windows spawn + ROCm 稳定性。
     p = "rvc/train/train.py"
     c = read(p)
     if "nan_guard_max_grad_norm" in c:
-        print("[8/8] train.py: NaN 守卫已存在，跳过")
+        print("[8/8] train.py: 训练稳定套装已存在，跳过")
     else:
         backup(p)
         c = replace_checked(
@@ -353,8 +356,34 @@ def main():
                     grad_norm_g = float("nan")""",
             "train.py G 梯度守卫",
         )
+        c = replace_checked(
+            c,
+            """    train_loader = DataLoader(
+        train_dataset,
+        num_workers=4,
+        shuffle=False,
+        pin_memory=True,
+        collate_fn=collate_fn,
+        batch_sampler=train_sampler,
+        persistent_workers=True,
+        prefetch_factor=8,
+    )""",
+            """    train_loader = DataLoader(
+        train_dataset,
+        # num_workers=0 on purpose: Windows spawn + ROCm multiprocessing
+        # dataloaders are flaky (proven in the field on Applio-main).
+        num_workers=0,
+        shuffle=False,
+        pin_memory=True,
+        collate_fn=collate_fn,
+        batch_sampler=train_sampler,
+        persistent_workers=False,
+        prefetch_factor=None,
+    )""",
+            "train.py DataLoader num_workers=0",
+        )
         write(p, c)
-        print("[8/8] train.py: 梯度裁剪 + NaN 守卫(D/G step前)")
+        print("[8/8] train.py: 训练稳定套装(NaN守卫+梯度裁剪+DataLoader单进程)")
 
     print("\n" + "=" * 50)
     if WARNINGS:
