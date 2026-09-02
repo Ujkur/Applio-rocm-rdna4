@@ -248,6 +248,17 @@ The ROCm Windows build of torch ships without `torch.distributed` (verified: `di
 
 `bf16` is more stable on ROCm (same dynamic range as fp32, no loss scaling needed).
 
+## Known Environment Issue (Important)
+
+> [!WARNING]
+> **torch 2.9.1 + rocm 7.2.1 wheel has incomplete gfx1201 kernels**: the default install uses ROCm 7.2.1 / PyTorch 2.9.1 wheels which miss some matmul/softmax/bmm fused kernels for RDNA4 on RX 9070 XT, causing **inference** (`Converting audio chunk` loop) to repeatedly report `CUDA ERROR: no kernel image is available for execution on device` + `[ERROR] device/model/fp is None` spam. **Training usually works** (the training aten subset differs); inference needs a torch/ROCm upgrade.
+
+**Fix**: upgrade to the AMD compatibility matrix official pair `torch 2.13.0 + rocm 10.0.0` (gfx1201+Windows, full pipeline verified; ~5 GB extra). Install: `pip install --no-cache-dir https://stable.repo.amd.com/rocm/whl-next/torch-2.13.0+rocm10.0.0-cp312-cp312-win_amd64.whl ...` (the rest of the wheels live on the same host; see the repo's `applio-rocm10-upgrade` skill for the full procedure).
+
+**Short-term workaround** (only the log is spammed but the audio is still produced — tolerable): ignore the ERROR lines, the inference result is still correct — RVC's `try/except` falls back to a slow CPU path each time a kernel fails, so each chunk is 10–100× slower. If your audio still generates (just slowly), you don't need to upgrade.
+
+**Quick check you're hitting the same issue**: if the error contains `raise GpuError(CUDA ERROR: no kernel image` and your torch is 2.9.1+rocm7.2.1, yes.
+
 ## Parameter Constraints
 
 | Parameter | Value | Limit | Reason |
