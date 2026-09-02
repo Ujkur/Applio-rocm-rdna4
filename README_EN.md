@@ -15,7 +15,7 @@
 
 </div>
 
-The original Applio has **5 issues** on RDNA4 GPUs: inference crashes, metallic artifacts on long audio, CJK path errors, training errors, and slow training. This repo provides a **one-click patch script** that fixes all of them, plus **1 stitching quality optimization**. Code changes only — no model weights involved.
+The original Applio has **6 issues** on RDNA4 GPUs: inference crashes, metallic artifacts on long audio, CJK path errors, training errors, slow training, and prerequisite download timeouts (China network). This repo provides a **one-click patch script** that fixes all of them, plus **1 stitching quality optimization**. Code changes only — no model weights involved.
 
 ## Issues and Fixes
 
@@ -27,6 +27,7 @@ The original Applio has **5 issues** on RDNA4 GPUs: inference crashes, metallic 
 | 4 | Training `init_process_group` error | Critical | `hasattr` check, skip for single GPU | `rvc/train/train.py` |
 | 5 | Slow training | Medium | `benchmark=False` to avoid repeated MIOpen find | `rvc/train/train.py` |
 | 6 | Prerequisite download times out on first launch (China network) | Critical | prerequisites download source switched to hf-mirror.com | `rvc/lib/tools/prerequisites_download.py` |
+| 7 | One bad gradient step NaNs every weight mid-training (unrecoverable model death; a "flat" TB curve is an artifact) | Critical | Guard before `optimizer.step()`: skip steps with non-finite or oversized gradient norms, with a console warning | `rvc/train/train.py` |
 
 > [!NOTE]
 > Also includes a quality optimization: equal-power sin/cos crossfade (4096 samples / 85ms) replaces the bare `np.concatenate`, for smoother chunk stitching.
@@ -129,7 +130,7 @@ copy Applio-rocm-rdna4\apply_rdna4_patches.py .
 python apply_rdna4_patches.py
 ```
 
-The script automatically modifies 4 files (backing up originals as `.bak`) and confirms `applio_cudnn_off.py` is in place. Seeing `完成!` (Done) means success; if any pattern misses (usually a wrong Applio version), the script lists the problem and exits with a non-zero code. The script is idempotent — already-applied patches are skipped on re-run.
+The script automatically modifies 5 files (backing up originals as `.bak`) and confirms `applio_cudnn_off.py` is in place. Seeing `完成!` (Done) means success; if any pattern misses (usually a wrong Applio version), the script lists the problem and exits with a non-zero code. The script is idempotent — already-applied patches are skipped on re-run.
 
 ### Method 2: One-click install (recommended)
 
@@ -162,7 +163,7 @@ This repo ships 4 test scripts to confirm the environment, the patches, and the 
 | Script | What it verifies | Where to run |
 |--------|------------------|--------------|
 | `tests/check_environment.py` | Python 3.12, ROCm torch, GPU detection, bf16 compute | Any directory |
-| `tests/check_patches.py` | All 6 patches in place, patched files compile, live faiss CJK-path test | Applio root (or pass the path as an argument) |
+| `tests/check_patches.py` | All 8 patches in place, patched files compile, live faiss CJK-path test | Applio root (or pass the path as an argument) |
 | `tests/check_inference.py` | Inference path: cudnn-off + varying-shape convs + bf16 | Any directory |
 | `tests/check_training.py` | Training path: cudnn-on + MIOpen + real bf16 training steps | Any directory |
 
@@ -239,6 +240,8 @@ Inference entry script that executes `torch.backends.cudnn.enabled = False` befo
 
 The ROCm Windows build of torch ships without `torch.distributed` (verified: `dist.is_available()` returns `False`), so the original unconditional call raises `AttributeError`. The guard mirrors the DDP-wrapping condition below it (`n_gpus > 1 and device.type == "cuda"`), so skipping initialization on a single GPU has no side effects.
 
+**NaN guard (prevents one-step model death)**: the upstream training loop has no gradient clipping and no NaN protection — one bad gradient step lets Adam **poison every weight at once** (reproduced on RX 9070 XT + ROCm 7.2.1 + bf16: the model died between epochs 11-20 with 457/457 tensors NaN, unrecoverable; a "flat" TB curve mid-training is an artifact of NaN points not being rendered, and silent preview samples + `summary.py invalid value encountered in cast` warnings are post-mortem symptoms). The guard checks the gradient norm before every `optimizer.step()` (`commons.grad_norm()` returns a float, checked with `math.isfinite`); if it is non-finite or above `nan_guard_max_grad_norm` (1e5), the step is skipped and `[NaN-guard] step N ...` is printed — a bad batch costs one step instead of the whole run. If `[NaN-guard]` spams during retraining, switch precision to fp32 or halve the learning rate.
+
 ### 5. `assets/config_template.json`
 
 ```diff
@@ -247,6 +250,11 @@ The ROCm Windows build of torch ships without `torch.distributed` (verified: `di
 ```
 
 `bf16` is more stable on ROCm (same dynamic range as fp32, no loss scaling needed).
+
+### 6. `rvc/lib/tools/prerequisites_download.py`
+
+- **Download source**: `url_base` changed from `huggingface.co` to the `hf-mirror.com` China mirror (the original hardcodes it and ignores the `HF_ENDPOINT` env var, so direct connections from China always time out)
+- **Broken-stream robustness**: `requests.get` now has timeouts + 5 automatic retries, and deletes incomplete files on failure — preventing corrupt files from being mistaken for "already downloaded" by the existence check
 
 ## Known Environment Issue (Important)
 
@@ -313,6 +321,7 @@ The patch script backs up originals as `.bak`. Rename the following `.bak` files
 - `rvc/infer/pipeline.py.bak` → `rvc/infer/pipeline.py`
 - `rvc/train/train.py.bak` → `rvc/train/train.py`
 - `assets/config_template.json.bak` → `assets/config_template.json`
+- `rvc/lib/tools/prerequisites_download.py.bak` → `rvc/lib/tools/prerequisites_download.py`
 
 Then delete `applio_cudnn_off.py`.
 
