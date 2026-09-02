@@ -248,6 +248,17 @@ ROCm Windows 版 torch 不含 `torch.distributed`（实测 `dist.is_available()`
 
 `bf16` 在 ROCm 上更稳定（动态范围同 fp32，无需 loss scaling）。
 
+## 已知环境问题（重要）
+
+> [!WARNING]
+> **torch 2.9.1 + rocm 7.2.1 在 gfx1201 上 wheel 内核不完整**：本项目默认安装的 ROCm 7.2.1 / PyTorch 2.9.1 wheel 在 RX 9070 XT 上对某些 matmul/softmax/bmm fused kernel 缺少 RDNA4 编译产物，导致**推理**阶段（`Converting audio chunk` 循环）反复报 `CUDA ERROR: no kernel image is available for execution on device` + `[ERROR] device/model/fp is None` 刷屏。**训练通常不受影响**（RVC 训练路径调用的 aten 子集不同），但推理需升级 ROCm + torch。
+
+**修复**：升级到 AMD 兼容矩阵官方配套 `torch 2.13.0 + rocm 10.0.0`（gfx1201+Windows 全流程可用，约多占 5 GB）。要装的话：`pip install --no-cache-dir https://stable.repo.amd.com/rocm/whl-next/torch-2.13.0+rocm10.0.0-cp312-cp312-win_amd64.whl ...`（后续 wheels 在同源；完整步骤见本仓库 skill `applio-rocm10-upgrade`）。
+
+**短期绕开**（确认仅刷屏但音频仍正确产出，可忍受）：无视 ERROR 行，推理结果仍是正确的——只是 RVC 的 `try/except` 在每个 kernel 失败时 fallback 到 CPU 回算，导致每个 chunk 慢 10-100 倍。如果你的音频正常生成只是很慢，无需升级。
+
+**快速验证你踩了同一个坑**：报错里若含 `raise GpuError(CUDA ERROR: no kernel image` 且 torch 是 2.9.1+rocm7.2.1，就是。
+
 ## 参数约束
 
 | 参数 | 值 | 上限 | 原因 |
