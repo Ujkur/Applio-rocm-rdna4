@@ -27,7 +27,7 @@ The original Applio has **6 issues** on RDNA4 GPUs: inference crashes, metallic 
 | 4 | Training `init_process_group` error | Critical | `hasattr` check, skip for single GPU | `rvc/train/train.py` |
 | 5 | Slow training | Medium | `benchmark=False` to avoid repeated MIOpen find | `rvc/train/train.py` |
 | 6 | Prerequisite download times out on first launch (China network) | Critical | prerequisites download source switched to hf-mirror.com | `rvc/lib/tools/prerequisites_download.py` |
-| 7 | One bad gradient step NaNs every weight mid-training (unrecoverable model death; a "flat" TB curve is an artifact) | Critical | Guard before `optimizer.step()`: skip steps with non-finite or oversized gradient norms, with a console warning | `rvc/train/train.py` |
+| 7 | Mid-training collapse: type A, one bad gradient step NaNs every weight; type B, GAN memorization collapse on small datasets (d/adv drops to 0.3, losses spike 2-3x, epoch ~13-20, **ROCm-version independent**) | Critical | A: NaN guard + gradient clipping before `optimizer.step()`; B: `d_lr_coeff=0.5` + dataset curation (see Modification Details #4) | `rvc/train/train.py` |
 
 > [!NOTE]
 > Also includes a quality optimization: equal-power sin/cos crossfade (4096 samples / 85ms) replaces the bare `np.concatenate`, for smoother chunk stitching.
@@ -240,7 +240,12 @@ Inference entry script that executes `torch.backends.cudnn.enabled = False` befo
 
 The ROCm Windows build of torch ships without `torch.distributed` (verified: `dist.is_available()` returns `False`), so the original unconditional call raises `AttributeError`. The guard mirrors the DDP-wrapping condition below it (`n_gpus > 1 and device.type == "cuda"`), so skipping initialization on a single GPU has no side effects.
 
-**NaN guard (prevents one-step model death)**: the upstream training loop has no gradient clipping and no NaN protection — one bad gradient step lets Adam **poison every weight at once** (reproduced on RX 9070 XT + ROCm 7.2.1 + bf16: the model died between epochs 11-20 with 457/457 tensors NaN, unrecoverable; a "flat" TB curve mid-training is an artifact of NaN points not being rendered, and silent preview samples + `summary.py invalid value encountered in cast` warnings are post-mortem symptoms). The guard checks the gradient norm before every `optimizer.step()` (`commons.grad_norm()` returns a float, checked with `math.isfinite`); if it is non-finite or above `nan_guard_max_grad_norm` (1e5), the step is skipped and `[NaN-guard] step N ...` is printed — a bad batch costs one step instead of the whole run. If `[NaN-guard]` spams during retraining, switch precision to fp32 or halve the learning rate.
+**NaN guard + gradient clipping (prevents mid-training collapse)**: the upstream training loop has no gradient clipping and no NaN protection. Reproduced 2026-09-03 with the same dataset on BOTH ROCm 7.2.1 and ROCm 10.0 — three crashes, all around epoch ~13-20, of two kinds:
+
+- **Type A, one-step death**: one bad gradient step lets Adam poison every weight at once (457/457 tensors NaN, unrecoverable; a "flat" TB curve mid-training is an artifact of NaN points not being rendered; silent preview samples + `summary.py invalid value encountered in cast` warnings are post-mortem symptoms).
+- **Type B, GAN memorization collapse**: with a small single-recording dataset (~400 slices), the discriminator memorizes the whole set by ~epoch 15 (`d/adv` dropping to 0.2-0.4 is the memorization signature) and then crushes the generator (`g/total` doubles or triples) — **independent of the ROCm/driver stack** (same material crashes on both 7.2.1 and 10.0), a pure dataset-scale problem.
+
+Patch 8 clips every step to `max_norm=1.0` via `clip_grad_norm_` before `optimizer.step()` and guards with `math.isfinite` plus a 1e5 fuse (note: `commons.grad_norm()` returns a float, not a tensor) — a bad batch costs one step instead of the whole run. Type A is prevented and the early spikes of type B are dampened. **If training still shows the type-B signature (d/adv keeps collapsing)**: change `d_lr_coeff` at the top of train.py from `1.0` to `0.5` (half-speed discriminator, the standard anti-memorization lever) and curate the dataset (keep only clean target-voice segments; 10-15 min is enough).
 
 ### 5. `assets/config_template.json`
 
