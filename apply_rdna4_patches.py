@@ -51,7 +51,7 @@ def main():
     c = read(p)
     presets = re.findall(r"x_pad, x_query, x_center, x_max = \([^)]+\)", c)
     if presets and all(preset.endswith("(1, 3, 5, 6)") for preset in presets):
-        print("[1/7] config.py: 已是 (1,3,5,6)，跳过")
+        print("[1/8] config.py: 已是 (1,3,5,6)，跳过")
     else:
         backup(p)
         c, n = re.subn(
@@ -63,7 +63,7 @@ def main():
             WARNINGS.append("config.py: 未找到分块参数（Applio 版本可能不是 3.6.4）")
         else:
             write(p, c)
-            print(f"[1/7] config.py: x_center=5 (抗金属破音, 实际NSF前向~7s<临界7-8s), 命中{n}处")
+            print(f"[1/8] config.py: x_center=5 (抗金属破音, 实际NSF前向~7s<临界7-8s), 命中{n}处")
 
     # 2. pipeline.py: crossfade + faiss中文路径 + import
     p = "rvc/infer/pipeline.py"
@@ -81,7 +81,7 @@ def main():
     # 注意：幂等性检测保留 "fade_len"——它能同时识别脚本打的补丁和手动打过的补丁，
     # 避免对已打补丁的安装重复套用导致嵌套损坏。
     if "fade_len" in c:
-        print("[2/7] pipeline.py: crossfade 已存在，跳过")
+        print("[2/8] pipeline.py: crossfade 已存在，跳过")
     else:
         old_concat = "        audio_opt = np.concatenate(audio_opt)"
         new_crossfade = '''        # RDNA4: 等功率crossfade(4096/85ms) 替代裸concatenate
@@ -129,14 +129,14 @@ def main():
     if changed:
         backup(p)
         write(p, c)
-        print("[2/7] pipeline.py: crossfade(4096等功率) + faiss中文路径 + import")
+        print("[2/8] pipeline.py: crossfade(4096等功率) + faiss中文路径 + import")
 
     # 3. train.py: benchmark + distributed
     p = "rvc/train/train.py"
     c = read(p)
     changed = False
     if "torch.backends.cudnn.benchmark = False" in c:
-        print("[3/7] train.py: benchmark 已是 False，跳过")
+        print("[3/8] train.py: benchmark 已是 False，跳过")
     else:
         c2 = replace_checked(
             c,
@@ -177,21 +177,21 @@ def main():
     if changed:
         backup(p)
         write(p, c)
-        print("[3/7] train.py: benchmark=False + distributed条件(单GPU跳过)")
+        print("[3/8] train.py: benchmark=False + distributed条件(单GPU跳过)")
 
     # 4. config_template.json: bf16
     p = "assets/config_template.json"
     with open(p, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     if cfg.get("precision") == "bf16":
-        print("[4/7] config_template.json: 已是 bf16，跳过")
+        print("[4/8] config_template.json: 已是 bf16，跳过")
     else:
         backup(p)
         cfg["precision"] = "bf16"
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        print("[4/7] config_template.json: precision=bf16")
+        print("[4/8] config_template.json: precision=bf16")
 
     # 5. prerequisites_download.py: 预训练下载源 huggingface.co -> hf-mirror.com
     # 原版 url_base 硬编码 huggingface.co（requests 直连，不走 HF_ENDPOINT 环境变量），
@@ -202,14 +202,14 @@ def main():
     else:
         c = read(p)
         if "hf-mirror.com" in c:
-            print("[5/7] prerequisites_download.py: 已是 hf-mirror.com，跳过")
+            print("[5/8] prerequisites_download.py: 已是 hf-mirror.com，跳过")
         else:
             old_url = 'url_base = "https://huggingface.co/IAHispano/Applio/resolve/main/Resources"'
             new_url = 'url_base = "https://hf-mirror.com/IAHispano/Applio/resolve/main/Resources"'
             if old_url in c:
                 backup(p)
                 write(p, c.replace(old_url, new_url))
-                print("[5/7] prerequisites_download.py: url_base -> hf-mirror.com (国内镜像)")
+                print("[5/8] prerequisites_download.py: url_base -> hf-mirror.com (国内镜像)")
             else:
                 WARNINGS.append("prerequisites_download.py: 未找到原版 url_base 行")
 
@@ -223,7 +223,7 @@ def main():
     else:
         c = read(p)
         if "_attempt" in c:
-            print("[6/7] prerequisites_download.py: 断流重试补丁已存在，跳过")
+            print("[6/8] prerequisites_download.py: 断流重试补丁已存在，跳过")
         else:
             old_fn = """    dir_name = os.path.dirname(destination_path)
     if dir_name:
@@ -257,15 +257,90 @@ def main():
             if old_fn in c:
                 backup(p)
                 write(p, c.replace(old_fn, new_fn))
-                print("[6/7] prerequisites_download.py: download_file 断流重试 + 失败清理")
+                print("[6/8] prerequisites_download.py: download_file 断流重试 + 失败清理")
             else:
                 WARNINGS.append("prerequisites_download.py: 未找到原版 download_file 函数体")
 
     # 7. applio_cudnn_off.py
     if os.path.isfile("applio_cudnn_off.py"):
-        print("[7/7] applio_cudnn_off.py: 已存在")
+        print("[7/8] applio_cudnn_off.py: 已存在")
     else:
         WARNINGS.append("applio_cudnn_off.py 不在当前目录，请从本 repo 复制后再运行推理")
+
+    # 8. train.py: 训练 NaN 守卫
+    # 上游 Applio/RVC 训练循环没有梯度裁剪和 NaN 保护：一步坏梯度经 Adam 一步污染
+    # 全部权重，不可逆（RX 9070 XT + ROCm 7.2.1 + bf16 实测：epoch 11-20 间暴毙，
+    # 457/457 张量 NaN。TB 曲线中途"变平"是 NaN 点不渲染的假象；试听静音 +
+    # summary.py "invalid value encountered in cast" 警告都是死后症状）。
+    p = "rvc/train/train.py"
+    c = read(p)
+    if "nan_guard_max_grad_norm" in c:
+        print("[8/8] train.py: NaN 守卫已存在，跳过")
+    else:
+        backup(p)
+        c = replace_checked(
+            c,
+            "import json",
+            "import json\nimport math",
+            "train.py import math",
+        )
+        c = replace_checked(
+            c,
+            "bf16_adamw = False",
+            "bf16_adamw = False\n\n"
+            "# NaN/explosion guard: if a backward pass produces non-finite or absurdly large\n"
+            "# gradient norms, skip the optimizer step instead of letting Adam poison every\n"
+            "# weight in the model (one bad batch used to kill the whole run instantly).\n"
+            "nan_guard_max_grad_norm = 1.0e5",
+            "train.py NaN-guard 常量",
+        )
+        c = replace_checked(
+            c,
+            """                else:
+                    loss_disc.backward()
+                    grad_norm_d = commons.grad_norm(net_d.parameters())
+                    optim_d.step()""",
+            """                else:
+                    loss_disc.backward()
+                    # commons.grad_norm returns a float (.item()); NaN grads -> NaN float
+                    grad_norm_d = float(commons.grad_norm(net_d.parameters()))
+                    if (
+                        math.isfinite(grad_norm_d)
+                        and grad_norm_d < nan_guard_max_grad_norm
+                    ):
+                        optim_d.step()
+                    else:
+                        optim_d.zero_grad()
+                        print(
+                            f"[NaN-guard] step {global_step}: unsafe D gradients (norm={grad_norm_d}), D update skipped"
+                        )
+                        grad_norm_d = float("nan")""",
+            "train.py D 梯度守卫",
+        )
+        c = replace_checked(
+            c,
+            """            else:
+                loss_gen_all.backward()
+                grad_norm_g = commons.grad_norm(net_g.parameters())
+                optim_g.step()""",
+            """            else:
+                loss_gen_all.backward()
+                grad_norm_g = float(commons.grad_norm(net_g.parameters()))
+                if (
+                    math.isfinite(grad_norm_g)
+                    and grad_norm_g < nan_guard_max_grad_norm
+                ):
+                    optim_g.step()
+                else:
+                    optim_g.zero_grad()
+                    print(
+                        f"[NaN-guard] step {global_step}: unsafe G gradients (norm={grad_norm_g}), G update skipped"
+                    )
+                    grad_norm_g = float("nan")""",
+            "train.py G 梯度守卫",
+        )
+        write(p, c)
+        print("[8/8] train.py: NaN 守卫(D/G step前检查)")
 
     print("\n" + "=" * 50)
     if WARNINGS:
