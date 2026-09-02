@@ -27,7 +27,7 @@
 | 4 | 训练 `init_process_group` 报错 | 严重 | `hasattr` 检查，单 GPU 跳过 | `rvc/train/train.py` |
 | 5 | 训练慢 | 中等 | `benchmark=False`，避免 MIOpen 反复 find | `rvc/train/train.py` |
 | 6 | 首次启动预训练下载超时（国内网络） | 严重 | prerequisites 下载源改走 hf-mirror.com 国内镜像 | `rvc/lib/tools/prerequisites_download.py` |
-| 7 | 训练中一步坏梯度致全部权重 NaN（模型不可逆暴毙，TB 曲线"变平"是假象） | 严重 | `optimizer.step()` 前守卫：梯度范数非有限或超阈值则跳过该步并告警 | `rvc/train/train.py` |
+| 7 | 训练中途崩溃：A 型一步坏梯度致全部权重 NaN；B 型小数据集 GAN 记忆崩溃（d/adv 跌至 0.3、损失飙 2-3 倍，epoch ~13-20，**与 ROCm 版本无关**） | 严重 | A：`optimizer.step()` 前 NaN 守卫 + 梯度裁剪；B：`d_lr_coeff=0.5` + 素材净化（详见修改详解 #4） | `rvc/train/train.py` |
 
 > [!NOTE]
 > 另含一项音质优化：等功率 sin/cos crossfade（4096 样本 / 85ms）替代原版裸 `np.concatenate`，块拼接过渡更平滑。
@@ -240,7 +240,12 @@ set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PA
 
 ROCm Windows 版 torch 不含 `torch.distributed`（实测 `dist.is_available()` 为 `False`），原版的无条件调用会直接 `AttributeError`。守卫条件与下方 DDP 包装的条件（`n_gpus > 1 and device.type == "cuda"`）保持一致，单 GPU 跳过初始化无任何影响。
 
-**NaN 守卫（防一步暴毙）**：上游训练循环没有梯度裁剪和 NaN 保护——一步坏梯度经 Adam 会**一次性污染全部权重**（实测 RX 9070 XT + ROCm 7.2.1 + bf16：epoch 11-20 间暴毙，457/457 张量 NaN，不可逆；TB 曲线中途"变平"是 NaN 点不渲染的假象，试听静音 + `summary.py invalid value encountered in cast` 警告都是死后症状）。守卫在每个 `optimizer.step()` 前检查梯度范数（`commons.grad_norm()` 返回 float，用 `math.isfinite` 判断），非有限或超过 `nan_guard_max_grad_norm`（1e5）则跳过该步并打印 `[NaN-guard] step N ...`——坏 batch 只损失一步。若重训时 `[NaN-guard]` 频繁刷屏，把精度切 fp32 或学习率减半。
+**NaN 守卫 + 梯度裁剪（防训练中途崩溃）**：上游训练循环没有梯度裁剪和 NaN 保护。2026-09-03 用同一素材在 ROCm 7.2.1 与 ROCm 10.0 两套环境实测三次，崩溃分两种（全部崩于 epoch ~13-20）：
+
+- **A 型一步暴毙**：一步坏梯度经 Adam 一次性污染全部权重（457/457 NaN，不可逆；NaN 后 TB 曲线"变平"是 NaN 点不渲染的假象，试听静音 + `summary.py invalid value encountered in cast` 警告是死后症状）。
+- **B 型 GAN 记忆崩溃**：单一长录音小数据集（~400 切片）被判别器 ~15 epoch 背完（`d/adv` 跌到 0.2-0.4 是记忆签名）后碾压生成器（`g/total` 翻 2-3 倍）——**与 ROCm/驱动版本无关**（7.2.1 与 10.0 同素材同样崩），纯数据集规模问题。
+
+补丁 8 在每个 `optimizer.step()` 前先 `clip_grad_norm_(max_norm=1.0)` 限步长，再以 `math.isfinite` + 阈值 1e5 守卫（注意 `commons.grad_norm()` 返回 float 而非 tensor），坏 batch 只损失一步——A 型被防住，B 型的早期尖峰也被压制。**若训练仍现 B 型签名（d/adv 持续崩塌）**：把 train.py 顶部 `d_lr_coeff` 从 `1.0` 改为 `0.5`（判别器半速学习，抗记忆崩溃）并净化素材（只保留干净目标音色段，10-15 分钟足够）。
 
 ### 5. `assets/config_template.json`
 
