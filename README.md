@@ -15,7 +15,7 @@
 
 </div>
 
-原版 Applio 在 RDNA4 显卡上存在 **5 个问题**：推理崩溃、长音频金属破音、中文路径报错、训练报错、训练慢。本仓库提供**一键补丁脚本**修复全部问题，另含 **1 项拼接音质优化**。只改代码，不涉及模型权重。
+原版 Applio 在 RDNA4 显卡上存在 **6 个问题**：推理崩溃、长音频金属破音、中文路径报错、训练报错、训练慢、预训练下载超时（国内网络）。本仓库提供**一键补丁脚本**修复全部问题，另含 **1 项拼接音质优化**。只改代码，不涉及模型权重。
 
 ## 问题与修复
 
@@ -27,6 +27,7 @@
 | 4 | 训练 `init_process_group` 报错 | 严重 | `hasattr` 检查，单 GPU 跳过 | `rvc/train/train.py` |
 | 5 | 训练慢 | 中等 | `benchmark=False`，避免 MIOpen 反复 find | `rvc/train/train.py` |
 | 6 | 首次启动预训练下载超时（国内网络） | 严重 | prerequisites 下载源改走 hf-mirror.com 国内镜像 | `rvc/lib/tools/prerequisites_download.py` |
+| 7 | 训练中一步坏梯度致全部权重 NaN（模型不可逆暴毙，TB 曲线"变平"是假象） | 严重 | `optimizer.step()` 前守卫：梯度范数非有限或超阈值则跳过该步并告警 | `rvc/train/train.py` |
 
 > [!NOTE]
 > 另含一项音质优化：等功率 sin/cos crossfade（4096 样本 / 85ms）替代原版裸 `np.concatenate`，块拼接过渡更平滑。
@@ -129,7 +130,7 @@ copy Applio-rocm-rdna4\apply_rdna4_patches.py .
 python apply_rdna4_patches.py
 ```
 
-脚本自动修改 4 个文件（原文件备份为 `.bak`），并确认 `applio_cudnn_off.py` 就位。看到 `完成!` 即表示成功；若某处未命中（通常是 Applio 版本不对），脚本会明确列出问题并以非零码退出。脚本可重复运行，已打过的补丁会自动跳过。
+脚本自动修改 5 个文件（原文件备份为 `.bak`），并确认 `applio_cudnn_off.py` 就位。看到 `完成!` 即表示成功；若某处未命中（通常是 Applio 版本不对），脚本会明确列出问题并以非零码退出。脚本可重复运行，已打过的补丁会自动跳过。
 
 ### 方法二：一键安装（推荐）
 
@@ -162,7 +163,7 @@ python apply_rdna4_patches.py
 | 脚本 | 验证内容 | 运行位置 |
 |------|----------|----------|
 | `tests/check_environment.py` | Python 3.12、ROCm torch、GPU 识别、bf16 计算 | 任意目录 |
-| `tests/check_patches.py` | 6 项补丁全部落点、patched 文件可编译、faiss 中文路径实测 | Applio 根目录（或把路径作为参数传入） |
+| `tests/check_patches.py` | 8 项补丁全部落点、patched 文件可编译、faiss 中文路径实测 | Applio 根目录（或把路径作为参数传入） |
 | `tests/check_inference.py` | 推理路径：cudnn-off + 变 shape 卷积 + bf16 | 任意目录 |
 | `tests/check_training.py` | 训练路径：cudnn-on + MIOpen + bf16 真实训练步 | 任意目录 |
 
@@ -239,6 +240,8 @@ set "PATH=<Python安装路径>\Lib\site-packages\_rocm_sdk_core\lib\llvm\bin;%PA
 
 ROCm Windows 版 torch 不含 `torch.distributed`（实测 `dist.is_available()` 为 `False`），原版的无条件调用会直接 `AttributeError`。守卫条件与下方 DDP 包装的条件（`n_gpus > 1 and device.type == "cuda"`）保持一致，单 GPU 跳过初始化无任何影响。
 
+**NaN 守卫（防一步暴毙）**：上游训练循环没有梯度裁剪和 NaN 保护——一步坏梯度经 Adam 会**一次性污染全部权重**（实测 RX 9070 XT + ROCm 7.2.1 + bf16：epoch 11-20 间暴毙，457/457 张量 NaN，不可逆；TB 曲线中途"变平"是 NaN 点不渲染的假象，试听静音 + `summary.py invalid value encountered in cast` 警告都是死后症状）。守卫在每个 `optimizer.step()` 前检查梯度范数（`commons.grad_norm()` 返回 float，用 `math.isfinite` 判断），非有限或超过 `nan_guard_max_grad_norm`（1e5）则跳过该步并打印 `[NaN-guard] step N ...`——坏 batch 只损失一步。若重训时 `[NaN-guard]` 频繁刷屏，把精度切 fp32 或学习率减半。
+
 ### 5. `assets/config_template.json`
 
 ```diff
@@ -247,6 +250,11 @@ ROCm Windows 版 torch 不含 `torch.distributed`（实测 `dist.is_available()`
 ```
 
 `bf16` 在 ROCm 上更稳定（动态范围同 fp32，无需 loss scaling）。
+
+### 6. `rvc/lib/tools/prerequisites_download.py`
+
+- **下载源**：`url_base` 从 `huggingface.co` 改为 `hf-mirror.com` 国内镜像（原版硬编码不走 `HF_ENDPOINT` 环境变量，国内直连必超时）
+- **断流健壮性**：`requests.get` 加超时 + 5 次自动重试，失败时删除不完整文件——避免坏文件被"文件已存在"检查误判为下载成功
 
 ## 已知环境问题（重要）
 
@@ -313,6 +321,7 @@ RVC 变声的固有特性，不是配置问题。可尝试降低 `index_rate`（
 - `rvc/infer/pipeline.py.bak` → `rvc/infer/pipeline.py`
 - `rvc/train/train.py.bak` → `rvc/train/train.py`
 - `assets/config_template.json.bak` → `assets/config_template.json`
+- `rvc/lib/tools/prerequisites_download.py.bak` → `rvc/lib/tools/prerequisites_download.py`
 
 然后删除 `applio_cudnn_off.py`。
 
