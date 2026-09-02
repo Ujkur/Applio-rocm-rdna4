@@ -51,7 +51,7 @@ def main():
     c = read(p)
     presets = re.findall(r"x_pad, x_query, x_center, x_max = \([^)]+\)", c)
     if presets and all(preset.endswith("(1, 3, 5, 6)") for preset in presets):
-        print("[1/6] config.py: 已是 (1,3,5,6)，跳过")
+        print("[1/7] config.py: 已是 (1,3,5,6)，跳过")
     else:
         backup(p)
         c, n = re.subn(
@@ -63,7 +63,7 @@ def main():
             WARNINGS.append("config.py: 未找到分块参数（Applio 版本可能不是 3.6.4）")
         else:
             write(p, c)
-            print(f"[1/6] config.py: x_center=5 (抗金属破音, 实际NSF前向~7s<临界7-8s), 命中{n}处")
+            print(f"[1/7] config.py: x_center=5 (抗金属破音, 实际NSF前向~7s<临界7-8s), 命中{n}处")
 
     # 2. pipeline.py: crossfade + faiss中文路径 + import
     p = "rvc/infer/pipeline.py"
@@ -81,7 +81,7 @@ def main():
     # 注意：幂等性检测保留 "fade_len"——它能同时识别脚本打的补丁和手动打过的补丁，
     # 避免对已打补丁的安装重复套用导致嵌套损坏。
     if "fade_len" in c:
-        print("[2/6] pipeline.py: crossfade 已存在，跳过")
+        print("[2/7] pipeline.py: crossfade 已存在，跳过")
     else:
         old_concat = "        audio_opt = np.concatenate(audio_opt)"
         new_crossfade = '''        # RDNA4: 等功率crossfade(4096/85ms) 替代裸concatenate
@@ -129,14 +129,14 @@ def main():
     if changed:
         backup(p)
         write(p, c)
-        print("[2/6] pipeline.py: crossfade(4096等功率) + faiss中文路径 + import")
+        print("[2/7] pipeline.py: crossfade(4096等功率) + faiss中文路径 + import")
 
     # 3. train.py: benchmark + distributed
     p = "rvc/train/train.py"
     c = read(p)
     changed = False
     if "torch.backends.cudnn.benchmark = False" in c:
-        print("[3/6] train.py: benchmark 已是 False，跳过")
+        print("[3/7] train.py: benchmark 已是 False，跳过")
     else:
         c2 = replace_checked(
             c,
@@ -177,21 +177,21 @@ def main():
     if changed:
         backup(p)
         write(p, c)
-        print("[3/6] train.py: benchmark=False + distributed条件(单GPU跳过)")
+        print("[3/7] train.py: benchmark=False + distributed条件(单GPU跳过)")
 
     # 4. config_template.json: bf16
     p = "assets/config_template.json"
     with open(p, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     if cfg.get("precision") == "bf16":
-        print("[4/6] config_template.json: 已是 bf16，跳过")
+        print("[4/7] config_template.json: 已是 bf16，跳过")
     else:
         backup(p)
         cfg["precision"] = "bf16"
         with open(p, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        print("[4/6] config_template.json: precision=bf16")
+        print("[4/7] config_template.json: precision=bf16")
 
     # 5. prerequisites_download.py: 预训练下载源 huggingface.co -> hf-mirror.com
     # 原版 url_base 硬编码 huggingface.co（requests 直连，不走 HF_ENDPOINT 环境变量），
@@ -202,20 +202,68 @@ def main():
     else:
         c = read(p)
         if "hf-mirror.com" in c:
-            print("[5/6] prerequisites_download.py: 已是 hf-mirror.com，跳过")
+            print("[5/7] prerequisites_download.py: 已是 hf-mirror.com，跳过")
         else:
             old_url = 'url_base = "https://huggingface.co/IAHispano/Applio/resolve/main/Resources"'
             new_url = 'url_base = "https://hf-mirror.com/IAHispano/Applio/resolve/main/Resources"'
             if old_url in c:
                 backup(p)
                 write(p, c.replace(old_url, new_url))
-                print("[5/6] prerequisites_download.py: url_base -> hf-mirror.com (国内镜像)")
+                print("[5/7] prerequisites_download.py: url_base -> hf-mirror.com (国内镜像)")
             else:
                 WARNINGS.append("prerequisites_download.py: 未找到原版 url_base 行")
 
-    # 6. applio_cudnn_off.py
+    # 6. prerequisites_download.py: download_file 断流健壮性（自动重试 + 失败清理坏文件）
+    # 原版 requests.get 一次性拉取，无重试无超时；断流(Connection broken/IncompleteRead)时
+    # 留下不完整文件且 download_mapping_files 的 os.path.exists 会把坏文件误判为"已存在"。
+    # 多次实测：hf-mirror 大文件(~140MB)偶发断流 → 崩溃 + 坏文件残留，重跑也跳过坏文件。
+    p = "rvc/lib/tools/prerequisites_download.py"
+    if not os.path.isfile(p):
+        WARNINGS.append("prerequisites_download.py 不存在（Applio 版本可能不是 3.6.4）")
+    else:
+        c = read(p)
+        if "_attempt" in c:
+            print("[6/7] prerequisites_download.py: 断流重试补丁已存在，跳过")
+        else:
+            old_fn = """    dir_name = os.path.dirname(destination_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    response = requests.get(url, stream=True)
+    block_size = 1024
+    with open(destination_path, "wb") as file:
+        for data in response.iter_content(block_size):
+            file.write(data)
+            global_bar.update(len(data))"""
+            new_fn = """    dir_name = os.path.dirname(destination_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    # RDNA4: 断流自动重试(5次,带超时) + 失败删除不完整文件,避免坏文件被 exists 误判跳过
+    for _attempt in range(5):
+        try:
+            with requests.get(url, stream=True, timeout=(15, 120)) as response:
+                response.raise_for_status()
+                with open(destination_path, "wb") as file:
+                    for data in response.iter_content(1024):
+                        file.write(data)
+                        global_bar.update(len(data))
+            return
+        except Exception:
+            try:
+                os.remove(destination_path)
+            except OSError:
+                pass
+            if _attempt == 4:
+                raise"""
+            if old_fn in c:
+                backup(p)
+                write(p, c.replace(old_fn, new_fn))
+                print("[6/7] prerequisites_download.py: download_file 断流重试 + 失败清理")
+            else:
+                WARNINGS.append("prerequisites_download.py: 未找到原版 download_file 函数体")
+
+    # 7. applio_cudnn_off.py
     if os.path.isfile("applio_cudnn_off.py"):
-        print("[6/6] applio_cudnn_off.py: 已存在")
+        print("[7/7] applio_cudnn_off.py: 已存在")
     else:
         WARNINGS.append("applio_cudnn_off.py 不在当前目录，请从本 repo 复制后再运行推理")
 
