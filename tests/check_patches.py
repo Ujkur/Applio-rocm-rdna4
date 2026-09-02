@@ -81,6 +81,7 @@ def main():
     try:
         c = read(p)
         check("hf-mirror.com" in c, "prerequisites_download.py url_base hf-mirror")
+        check("_attempt" in c, "prerequisites_download.py retry on broken stream")
     except Exception as e:
         check(False, "prerequisites_download.py url_base hf-mirror", str(e))
 
