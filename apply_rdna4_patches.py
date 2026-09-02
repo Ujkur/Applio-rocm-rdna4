@@ -291,7 +291,12 @@ def main():
             "# NaN/explosion guard: if a backward pass produces non-finite or absurdly large\n"
             "# gradient norms, skip the optimizer step instead of letting Adam poison every\n"
             "# weight in the model (one bad batch used to kill the whole run instantly).\n"
-            "nan_guard_max_grad_norm = 1.0e5",
+            "nan_guard_max_grad_norm = 1.0e5\n\n"
+            "# Gradient clipping caps each optimizer step's magnitude. Stops loss spikes\n"
+            "# (e.g. GAN imbalance where the discriminator crushes the generator) from\n"
+            "# kicking the model into a bad local minimum. Applied IN-PLACE; the returned\n"
+            "# norm is pre-clamp and is what the NaN guard above checks.\n"
+            "grad_clip_max_norm = 1.0",
             "train.py NaN-guard 常量",
         )
         c = replace_checked(
@@ -302,8 +307,13 @@ def main():
                     optim_d.step()""",
             """                else:
                     loss_disc.backward()
-                    # commons.grad_norm returns a float (.item()); NaN grads -> NaN float
-                    grad_norm_d = float(commons.grad_norm(net_d.parameters()))
+                    # clip_grad_norm_ caps each step to a safe magnitude and
+                    # returns the PRE-clip norm (what the NaN-guard below checks)
+                    grad_norm_d = float(
+                        torch.nn.utils.clip_grad_norm_(
+                            net_d.parameters(), max_norm=grad_clip_max_norm
+                        )
+                    )
                     if (
                         math.isfinite(grad_norm_d)
                         and grad_norm_d < nan_guard_max_grad_norm
@@ -325,7 +335,11 @@ def main():
                 optim_g.step()""",
             """            else:
                 loss_gen_all.backward()
-                grad_norm_g = float(commons.grad_norm(net_g.parameters()))
+                grad_norm_g = float(
+                    torch.nn.utils.clip_grad_norm_(
+                        net_g.parameters(), max_norm=grad_clip_max_norm
+                    )
+                )
                 if (
                     math.isfinite(grad_norm_g)
                     and grad_norm_g < nan_guard_max_grad_norm
@@ -340,7 +354,7 @@ def main():
             "train.py G 梯度守卫",
         )
         write(p, c)
-        print("[8/8] train.py: NaN 守卫(D/G step前检查)")
+        print("[8/8] train.py: 梯度裁剪 + NaN 守卫(D/G step前)")
 
     print("\n" + "=" * 50)
     if WARNINGS:
