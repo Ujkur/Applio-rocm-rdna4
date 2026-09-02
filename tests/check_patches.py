@@ -60,12 +60,14 @@ def main():
     check("mkdtemp" in c, "pipeline.py faiss CJK-path workaround")
     check("import tempfile" in c, "pipeline.py tempfile/shutil imports")
 
-    # 3. train.py: benchmark=False + distributed guard
+    # 3. train.py: benchmark=False + distributed guard + NaN guard
     p = os.path.join(root, "rvc", "train", "train.py")
     c = read(p)
     check("torch.backends.cudnn.benchmark = False" in c, "train.py benchmark=False")
     check('hasattr(dist, "init_process_group")' in c or "dist.is_available()" in c,
           "train.py distributed guard")
+    check("import math" in c, "train.py import math (NaN guard)")
+    check("nan_guard_max_grad_norm" in c, "train.py NaN guard (skip unsafe optimizer steps)")
 
     # 4. config_template.json precision
     p = os.path.join(root, "assets", "config_template.json")
